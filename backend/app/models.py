@@ -63,6 +63,7 @@ class Document(Base):
     regions: Mapped[list] = mapped_column(JSON, default=list)
     chunks: Mapped[list] = mapped_column(JSON, default=list)
     synthetic: Mapped[bool] = mapped_column(Boolean, default=False)
+    ingestion_meta: Mapped[dict] = mapped_column(JSON, default=dict, server_default="{}")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     __table_args__ = (
         Index("ix_documents_search", text("to_tsvector('russian'::regconfig, (title || ' '::text) || content)"),
@@ -138,3 +139,16 @@ class Audit(Base):
     actor: Mapped[str] = mapped_column(String(100))
     details: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class FeedState(Base):
+    __tablename__ = "feed_states"
+    key: Mapped[str] = mapped_column(String(40), primary_key=True)
+    status: Mapped[str] = mapped_column(String(20), default="idle")
+    lease_token: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    next_refresh_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    report: Mapped[dict] = mapped_column(JSON, default=dict)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)

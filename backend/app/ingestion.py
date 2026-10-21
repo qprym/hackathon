@@ -15,11 +15,13 @@ from defusedxml import ElementTree
 from pypdf import PdfReader
 from sqlalchemy import select
 from .context import PRODUCTS, feature
+from .config import settings
 from .db import utcnow
 from .models import Company, Document, Event, Link
 from .retrieval import classify, tokens
 
 FEEDS = {"cbr": "https://www.cbr.ru/rss/RssPress", "vedomosti": "https://www.vedomosti.ru/rss/news"}
+FEED_NAMES = {"cbr": "Банк России", "vedomosti": "Ведомости"}
 ALLOWED_HOSTS = {"www.cbr.ru", "cbr.ru", "www.vedomosti.ru", "vedomosti.ru"}
 
 
@@ -40,7 +42,7 @@ def chunks_for(text, page=None):
             for i in range(0, len(text), 850) if text[i:i + 1000].strip()]
 
 
-def import_document(db, *, title, content, kind, publisher, published_at, url=None, synthetic=False, chunks=None):
+def import_document(db, *, title, content, kind, publisher, published_at, url=None, synthetic=False, chunks=None, ingestion_meta=None):
     if published_at.tzinfo:
         published_at = published_at.astimezone(UTC).replace(tzinfo=None)
     if published_at > utcnow() + timedelta(days=1):
@@ -54,15 +56,20 @@ def import_document(db, *, title, content, kind, publisher, published_at, url=No
     content_hash = digest(json.dumps(identity, ensure_ascii=False))
     existing = db.scalar(select(Document).where(Document.content_hash == content_hash))
     if existing:
+        if ingestion_meta:
+            existing.ingestion_meta = ingestion_meta
+            db.commit()
         return existing, False
     legacy = db.scalar(select(Document).where(Document.content_hash == digest(f"{kind}|{synthetic}|{text}")))
     if legacy and (legacy.title, legacy.publisher, legacy.url or "", legacy.published_at) == (title, publisher, url or "", published_at):
         legacy.content_hash = content_hash
+        if ingestion_meta:
+            legacy.ingestion_meta = ingestion_meta
         db.commit()
         return legacy, False
     doc = Document(title=title, content=text, kind=kind, publisher=publisher, url=url,
                    published_at=published_at, content_hash=content_hash, topics=classify(title + " " + text),
-                   synthetic=synthetic, chunks=chunks or chunks_for(text))
+                   synthetic=synthetic, chunks=chunks or chunks_for(text), ingestion_meta=ingestion_meta or {})
     db.add(doc)
     db.flush()
     if kind == "news":
@@ -222,31 +229,81 @@ def safe_fetch(url):
         raise ValueError("Слишком много перенаправлений")
 
 
-def import_feed(db, key):
+def extract_article(raw, key):
+    """Read public article paragraphs only; scripts and subscription content are not sources."""
+    page = BeautifulSoup(raw, "html.parser")
+    for script in page.select('script[type="application/ld+json"]'):
+        try:
+            stack = [json.loads(script.string or script.get_text())]
+            while stack:
+                value = stack.pop()
+                if isinstance(value, list):
+                    stack.extend(value)
+                elif isinstance(value, dict):
+                    if value.get("isAccessibleForFree") in (False, "false", "False"):
+                        raise ValueError("Полный текст доступен по подписке")
+                    stack.extend(v for v in value.values() if isinstance(v, (dict, list)))
+        except (json.JSONDecodeError, TypeError):
+            continue
+    for hidden in page.select('[hidden], [aria-hidden="true"], script, style, nav, footer, header'):
+        hidden.decompose()
+    if page.select_one('.paywall, .article-paywall, [data-paywall]'):
+        raise ValueError("Полный текст ограничен издателем")
+    if key == "vedomosti":
+        body = page.select_one('.article__body')
+        if body is None:
+            raise ValueError("Не найден контейнер статьи «Ведомостей»")
+        paragraphs = body.select('.article__boxes .box-paragraph__text')
+        selector = "vedomosti:article__boxes/box-paragraph__text"
+        text = "\n\n".join(clean_text(str(p)) for p in paragraphs if p.get_text(strip=True))
+    elif key == "cbr":
+        body = page.select_one('.landing-text') or page.find('article')
+        text = clean_text(str(body)) if body else ""
+        selector = "cbr:landing-text"
+    else:
+        raise ValueError("Нет адаптера источника")
+    if len(text) < 100:
+        raise ValueError("Не найден достаточный текст статьи на странице")
+    return text[:100_000], {"coverage": "article", "method": selector}
+
+
+def import_feed(db, key, on_progress=None):
     if key not in FEEDS:
         raise ValueError("Неизвестный источник")
     root = ElementTree.fromstring(safe_fetch(FEEDS[key]))
-    imported, errors = 0, []
-    for item in root.findall(".//item")[:30]:
+    imported, unchanged, articles, summaries, errors, warnings = 0, 0, 0, 0, [], []
+    items = root.findall(".//item")[:settings().rss_item_limit]
+    for item in items:
+        if on_progress:
+            on_progress()
         title = item.findtext("title") or "Без заголовка"
+        url = item.findtext("link")
         try:
             date = parsedate_to_datetime(item.findtext("pubDate") or "")
             content = clean_text(item.findtext("description") or "")
-            url = item.findtext("link")
-            # Full text is used only on open pages of the same allowlisted publisher.
+            meta = {"coverage": "summary", "method": "rss:description"}
+            warning = None
             if url:
                 try:
-                    page = BeautifulSoup(safe_fetch(url), "html.parser")
-                    article = page.find("article") or page.find("div", class_="landing-text")
-                    if article:
-                        extracted = clean_text(str(article))
-                        if len(extracted) >= len(content):
-                            content = extracted
-                except (ValueError, httpx.HTTPError):
-                    pass
+                    content, meta = extract_article(safe_fetch(url), key)
+                except (ValueError, httpx.HTTPError, OSError) as exc:
+                    warning = str(exc)[:200]
+            else:
+                warning = "В RSS отсутствует ссылка на статью"
+            if meta['coverage'] == 'summary' and len(content) < 60:
+                raise ValueError(warning or "В RSS нет достаточного текста")
+            meta.update({"feed": key, "fetched_at": utcnow().isoformat() + "Z"})
+            if warning:
+                meta["warning"] = warning
+                warnings.append({"title": title, "url": url, "message": warning})
             _, created = import_document(db, title=title, content=content, kind="news",
-                publisher="Банк России" if key == "cbr" else "Ведомости", published_at=date, url=url)
+                publisher=FEED_NAMES[key], published_at=date, url=url, ingestion_meta=meta)
             imported += int(created)
-        except (ValueError, TypeError, httpx.HTTPError) as exc:
-            errors.append({"title": title, "message": str(exc)[:200]})
-    return {"imported": imported, "errors": errors}
+            unchanged += int(not created)
+            articles += int(meta["coverage"] == "article")
+            summaries += int(meta["coverage"] == "summary")
+        except (ValueError, TypeError, httpx.HTTPError, OSError) as exc:
+            db.rollback()
+            errors.append({"title": title, "url": url, "message": str(exc)[:200]})
+    return {"imported": imported, "unchanged": unchanged, "articles": articles, "summaries": summaries,
+            "examined": len(items), "errors": errors, "warnings": warnings}

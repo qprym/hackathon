@@ -91,6 +91,7 @@ type Evidence = {
   published_at: string;
   page: number | null;
   synthetic: boolean;
+  coverage?: string;
 };
 type Claim = {
   text: string;
@@ -130,7 +131,21 @@ type Source = {
   publisher: string;
   url: string | null;
   synthetic: boolean;
+  ingestion: { coverage?: string; fetched_at?: string; warning?: string };
   chunks: { page: number | null; text: string }[];
+};
+type FeedStatus = {
+  automatic: boolean;
+  interval_seconds: number;
+  items: {
+    key: string;
+    name: string;
+    status: string;
+    last_finished_at: string | null;
+    next_refresh_at: string | null;
+    report: { articles?: number; summaries?: number; imported?: number };
+    error: string | null;
+  }[];
 };
 type Metrics = {
   runs: Record<string, number>;
@@ -652,9 +667,9 @@ function ImportPanel({ onChange }: { onChange: () => void }) {
                 </select>
               </label>
               <p className="form-note">
-                Загружаются доступные публикации. Реальные материалы появятся у
-                компаний, импортированных из CSV; синтетические профили
-                используют отдельный корпус.
+                Загружаются открытые статьи и их источники. Реальные новости
+                доступны всем профилям. Учебные события находятся в отдельной
+                вкладке ленты. Недоступный полный текст помечается явно.
               </p>
             </>
           )}
@@ -1098,6 +1113,7 @@ function Analysis({
                     {e.publisher} · {date(e.published_at)}
                     {e.page && ` · стр. ${e.page}`}
                   </p>
+                  {e.coverage === "summary" && <span className="pill amber">Только RSS-аннотация</span>}
                   <blockquote>{e.excerpt}</blockquote>
                   <button
                     className="text-button"
@@ -1209,6 +1225,8 @@ function MetricsPanel() {
 }
 
 export default function App() {
+  const [corpus, setCorpus] = useState<"real" | "synthetic">("real");
+  const [feedStatus, setFeedStatus] = useState<FeedStatus | null>(null);
   const [user, setUser] = useState<User | null>(null),
     [checking, setChecking] = useState(true),
     [companies, setCompanies] = useState<Company[]>([]),
@@ -1251,6 +1269,10 @@ export default function App() {
   }, [user, revision]);
   useEffect(() => {
     if (!companyId) return;
+    if (corpus === "synthetic" && companies.find((c) => c.id === companyId)?.synthetic === false) {
+      setCorpus("real");
+      return;
+    }
     let active = true;
     setBusy(true);
     setError("");
@@ -1260,7 +1282,7 @@ export default function App() {
     Promise.all([
       api<Context>(`/companies/${encodeURIComponent(companyId)}/context`),
       api<{ items: EventItem[]; topics: Record<string, string> }>(
-        `/feed?company_id=${encodeURIComponent(companyId)}&role=${role}`,
+        `/feed?company_id=${encodeURIComponent(companyId)}&role=${role}&corpus=${corpus}`,
       ),
     ])
       .then(([c, f]) => {
@@ -1279,7 +1301,30 @@ export default function App() {
     return () => {
       active = false;
     };
-  }, [companyId, role, revision]);
+  }, [companyId, role, revision, corpus, companies]);
+  useEffect(() => {
+    if (!user) return;
+    let active = true;
+    let pending = false;
+    const refresh = async () => {
+      if (pending) return;
+      pending = true;
+      try {
+        const status = await api<FeedStatus>("/feeds/status");
+        if (active) setFeedStatus(status);
+        if (companyId && page === "feed" && !runId) {
+          const feed = await api<{ items: EventItem[]; topics: Record<string, string> }>(
+            `/feed?company_id=${encodeURIComponent(companyId)}&role=${role}&corpus=${corpus}`,
+          );
+          if (active) { setItems(feed.items); setTopics(feed.topics); }
+        }
+      } catch { /* Transient refresh errors keep the current view intact. */ }
+      finally { pending = false; }
+    };
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 15000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [user, companyId, role, corpus, page, runId, revision]);
   useEffect(() => {
     const close = (event: KeyboardEvent) => {
       if (event.key === "Escape") setSource(null);
@@ -1497,6 +1542,24 @@ export default function App() {
               />
             ) : (
               <>
+                <div className="corpus-bar">
+                  <div className="corpus-tabs" aria-label="Материалы ленты">
+                    <button aria-pressed={corpus === "real"} onClick={() => { setCorpus("real"); setTopic(""); setSearch(""); }}>Реальные новости</button>
+                    {context?.synthetic && <button aria-pressed={corpus === "synthetic"} onClick={() => { setCorpus("synthetic"); setTopic(""); setSearch(""); }}>Учебные события</button>}
+                  </div>
+                  {feedStatus && <span className="muted small">{feedStatus.automatic ? `Автообновление · каждые ${Math.round(feedStatus.interval_seconds / 60)} мин` : "Автообновление отключено"}</span>}
+                </div>
+                {corpus === "real" && feedStatus && <div className="feed-status" aria-label="Состояние источников">
+                  {feedStatus.items.map((feed) => <div key={feed.key} className={`feed-status-item ${feed.status}`}>
+                    <span className="status-dot" />
+                    <div><strong>{feed.name}</strong><span>
+                      {({ pending: "Ожидает загрузки", idle: "Ожидает загрузки", running: "Загружаем статьи…", recovering: "Возобновляем загрузку…", ok: "Обновлено", partial: "Обновлено с замечаниями", error: "Источник временно недоступен" } as Record<string, string>)[feed.status] || feed.status}
+                      {feed.last_finished_at && ` · ${new Date(feed.last_finished_at).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}`}
+                      {feed.report.articles !== undefined && ` · ${feed.report.articles} статей`}
+                      {!!feed.report.summaries && ` · ${feed.report.summaries} аннотаций`}
+                    </span>{feed.error && <span>{feed.error}</span>}</div>
+                  </div>)}
+                </div>}
                 <div className="overview">
                   <div className="overview-copy">
                     <span className="pill">
@@ -1632,8 +1695,11 @@ export default function App() {
                         <Search size={30} />
                         <h3>Пока нет подходящих событий</h3>
                         <p>
-                          Измените фильтр или загрузите материал в разделе
-                          источников.
+                          {corpus === "real" && !items.length
+                            ? feedStatus?.automatic === false
+                              ? "Автообновление отключено. Администратор может загрузить новости в разделе «Источники и импорт»."
+                              : "Новости появятся здесь после обработки. Состояние автоматической загрузки показано выше."
+                            : "Измените фильтр или загрузите материал в разделе источников."}
                         </p>
                       </div>
                     )}
@@ -1688,6 +1754,13 @@ export default function App() {
             {source.synthetic && (
               <span className="pill amber">Синтетический материал</span>
             )}
+            {source.ingestion?.coverage && <p className="source-coverage">
+              <span className={"pill " + (source.ingestion.coverage === "summary" ? "amber" : "")}>
+                {source.ingestion.coverage === "summary" ? "Только RSS-аннотация" : "Текст статьи"}
+              </span>
+              {source.ingestion.fetched_at && <span className="muted small">Загружено {new Date(source.ingestion.fetched_at).toLocaleString("ru-RU")}</span>}
+            </p>}
+            {source.ingestion?.warning && <p className="muted small">{source.ingestion.warning}</p>}
             <div className="source-content">{source.content}</div>
             {source.url && /^https?:\/\//.test(source.url) && (
               <a

@@ -4,6 +4,7 @@ import threading
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Literal
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -13,12 +14,13 @@ from .auth import admin, authorize_company, current_user, make_session, token_ha
 from .config import settings
 from .context import company_context
 from .db import SessionLocal, engine, get_db, initialize_development_schema, utcnow
-from .ingestion import FEEDS, extract_pdf, import_csv, import_document, import_feed
+from .ingestion import FEEDS, extract_pdf, import_csv, import_document
 from .models import Audit, AuthSession, Budget, Company, Document, Event, Feedback, Link, Run, Usage, User
 from .retrieval import TOPIC_NAMES, rank_event
 from .schemas import Analyze, FeedbackInput, Login, NewsInput, Question, Role
 from .seed import seed
 from .worker import work_loop
+from .feeds import feed_status, refresh_feed
 
 
 @asynccontextmanager
@@ -123,10 +125,13 @@ def context(company_id: str, user: User = Depends(current_user), db: Session = D
 
 
 @app.get("/api/feed")
-def feed(company_id: str, role: Role = "CFO", topic: str | None = None, user: User = Depends(current_user), db: Session = Depends(get_db)):
+def feed(company_id: str, role: Role = "CFO", topic: str | None = None, corpus: Literal["real", "synthetic"] = "real",
+         user: User = Depends(current_user), db: Session = Depends(get_db)):
     company = authorize_company(db, user, company_id)
     ctx = company_context(db, company, user.company_ids)
-    events = db.scalars(select(Event).where(Event.synthetic == company.synthetic).order_by(Event.published_at.desc()).limit(500)).all()
+    if corpus == "synthetic" and not company.synthetic:
+        raise HTTPException(422, "Учебные события доступны только для учебных профилей")
+    events = db.scalars(select(Event).where(Event.synthetic == (corpus == "synthetic")).order_by(Event.published_at.desc()).limit(500)).all()
     entries = []
     for event in events:
         if topic and topic not in event.topics:
@@ -138,7 +143,12 @@ def feed(company_id: str, role: Role = "CFO", topic: str | None = None, user: Us
             "summary": doc.content[:230] if doc else "", "publisher": doc.publisher if doc else "",
             "source_count": len(event.document_ids), **ranking})
     entries.sort(key=lambda item: (item["score"], item["published_at"]), reverse=True)
-    return {"items": entries[:50], "topics": TOPIC_NAMES, "company_id": company_id, "role": role}
+    return {"items": entries[:50], "topics": TOPIC_NAMES, "company_id": company_id, "role": role, "corpus": corpus}
+
+
+@app.get("/api/feeds/status")
+def sources_status(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    return feed_status(db)
 
 
 def create_run(db, user, body, question=None, parent=None):
@@ -146,8 +156,8 @@ def create_run(db, user, body, question=None, parent=None):
     event = db.get(Event, body.event_id)
     if not event:
         raise HTTPException(404, "Событие не найдено")
-    if event.synthetic != company.synthetic:
-        raise HTTPException(422, "Синтетические и реальные данные анализируются отдельно")
+    if event.synthetic and not company.synthetic:
+        raise HTTPException(422, "Учебные события нельзя использовать для реальных компаний")
     # Corpus and relationship versions invalidate previously generated explanations.
     documents = db.execute(select(Document.id, Document.content_hash).where(Document.synthetic == event.synthetic)
                            .order_by(Document.id)).all()
@@ -155,7 +165,7 @@ def create_run(db, user, body, question=None, parent=None):
     access_scope = sorted(set(user.company_ids))
     key = hashlib.sha256(json.dumps([user.id, access_scope, body.model_dump(), company.features, str(company.updated_at),
         [list(d) for d in documents], [list(l) for l in links], question, parent, settings().demo_mode,
-        settings().llm_analysis_id, settings().llm_extraction_id, "prompt-v3"], sort_keys=True, default=str).encode()).hexdigest()
+        settings().llm_analysis_id, settings().llm_extraction_id, "prompt-v4"], sort_keys=True, default=str).encode()).hexdigest()
     existing = db.scalar(select(Run).where(Run.cache_key == key, Run.status.in_(["queued", "running", "completed"])).order_by(Run.created_at.desc()))
     if existing:
         return {"run_id": existing.id, "cached": existing.status == "completed"}
@@ -220,7 +230,7 @@ def source(source_id: str, user: User = Depends(current_user), db: Session = Dep
         raise HTTPException(404, "Источник не найден")
     return {"id": doc.id, "title": doc.title, "kind": doc.kind, "publisher": doc.publisher,
             "url": doc.url, "published_at": doc.published_at.isoformat() + "Z", "content": doc.content,
-            "chunks": doc.chunks, "synthetic": doc.synthetic}
+            "chunks": doc.chunks, "synthetic": doc.synthetic, "ingestion": doc.ingestion_meta}
 
 
 @app.post("/api/admin/news")
@@ -272,16 +282,12 @@ async def upload_pdf(file: UploadFile = File(...), title: str = Form(...), publi
 
 @app.post("/api/admin/feeds/{key}")
 def sync_feed(key: str, user: User = Depends(admin), db: Session = Depends(get_db)):
-    try:
-        report = import_feed(db, key)
-        db.add(Audit(action="rss", actor=user.id, details={"source": key, **report}))
-        db.commit()
-        return report
-    except Exception as exc:
-        db.rollback()
-        db.add(Audit(action="rss_error", actor=user.id, details={"source": key, "error_type": type(exc).__name__}))
-        db.commit()
-        raise HTTPException(502, "Источник недоступен или вернул неподдерживаемый формат") from exc
+    if key not in FEEDS:
+        raise HTTPException(404, "Источник не найден")
+    report = refresh_feed(key, force=True, actor=user.id)
+    if report["status"] == "error":
+        raise HTTPException(502, report["error"])
+    return report
 
 
 @app.get("/api/admin/metrics")

@@ -2033,3 +2033,15 @@ form {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+.corpus-bar { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin: 20px 0 14px; }
+.corpus-tabs { display: flex; gap: 5px; padding: 4px; border-radius: 12px; background: #eceef1; }
+.corpus-tabs button { border: 0; border-radius: 9px; background: transparent; padding: 10px 15px; color: #626775; font: inherit; font-size: 13px; cursor: pointer; }
+.corpus-tabs button[aria-pressed="true"] { color: #20242c; background: white; box-shadow: 0 1px 5px #15203512; }
+.feed-status { display: flex; flex-wrap: wrap; gap: 12px 28px; padding: 0 2px 20px; }
+.feed-status-item { display: flex; gap: 8px; align-items: flex-start; }
+.feed-status-item .status-dot { margin-top: 5px; flex-shrink: 0; }
+.feed-status-item strong { font-size: 12px; font-weight: 600; }
+.feed-status-item div > span { display: block; color: #777c88; font-size: 11px; margin-top: 4px; line-height: 1.5; }
+.feed-status-item.error .status-dot, .feed-status-item.partial .status-dot { background: #bd802b; }
+.feed-status-item.running .status-dot, .feed-status-item.pending .status-dot { background: #8190ab; }
+.source-coverage { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }

@@ -16,7 +16,7 @@ from app.llm import BudgetExceeded, ModelUnavailable, complete_json, reserve_bud
 
 
 def start(client, company="demo-metal", role="CFO"):
-    feed = client.get(f"/api/feed?company_id={company}&role={role}").json()
+    feed = client.get(f"/api/feed?corpus=synthetic&company_id={company}&role={role}").json()
     response = client.post("/api/analyses", json={"company_id": company, "event_id": feed["items"][0]["id"], "role": role})
     assert response.status_code == 202
     return response.json()["run_id"]
@@ -47,10 +47,10 @@ def test_end_to_end_analysis_sources_question_feedback(client):
 
 
 def test_company_and_role_change_rankings(client):
-    metal = client.get('/api/feed?company_id=demo-metal&role=CFO').json()['items']
-    retail = client.get('/api/feed?company_id=demo-retail&role=TREASURER').json()['items']
+    metal = client.get('/api/feed?corpus=synthetic&company_id=demo-metal&role=CFO').json()['items']
+    retail = client.get('/api/feed?corpus=synthetic&company_id=demo-retail&role=TREASURER').json()['items']
     assert metal[0]['id'] != retail[0]['id']
-    ceo = client.get('/api/feed?company_id=demo-metal&role=CEO').json()['items']
+    ceo = client.get('/api/feed?corpus=synthetic&company_id=demo-metal&role=CEO').json()['items']
     cfo = {e['id']: e['score'] for e in metal}
     assert any(cfo[e['id']] != e['score'] for e in ceo)
 
@@ -61,7 +61,7 @@ def test_access_boundaries_and_csrf(client):
         assert viewer.post('/api/auth/login', json={'username':'viewer','password':'demo-alfa-2026'}).status_code == 200
         assert len(viewer.get('/api/companies').json()) == 1
         assert viewer.get('/api/companies/demo-retail/context').status_code == 403
-        assert viewer.get('/api/feed?company_id=demo-retail').status_code == 403
+        assert viewer.get('/api/feed?corpus=synthetic&company_id=demo-retail').status_code == 403
         assert viewer.get(f'/api/runs/{run_id}').status_code == 404
         assert viewer.get('/api/admin/metrics').status_code == 403
         assert viewer.post('/api/admin/news', json={}).status_code == 403
@@ -80,7 +80,7 @@ def test_new_event_import_deduplication_and_injection(client, db):
     assert first['created'] is True and second['created'] is False
     assert first['document_id'] == second['document_id']
     assert '<script>' not in db.get(Document, first['document_id']).content
-    feed = client.get('/api/feed?company_id=demo-logistics').json()['items']
+    feed = client.get('/api/feed?corpus=synthetic&company_id=demo-logistics').json()['items']
     new = next(i for i in feed if i['title'] == payload['title'])
     run_id = client.post('/api/analyses', json={'company_id':'demo-logistics','event_id':new['id'],'role':'TREASURER'}).json()['run_id']
     process_one()
@@ -111,8 +111,9 @@ def test_csv_schema_detection_partial_errors_and_idempotency(client, db):
 def test_real_and_synthetic_corpus_are_separate(client, db):
     doc, _ = import_document(db,title='Реальная новость о ключевой ставке',content='Внешняя публикация о решении регулятора и условиях кредитования. Для анализа нужны договоры.',kind='news',publisher='Тест',published_at=utcnow(),synthetic=False)
     event = db.scalar(select(Event).where(Event.title==doc.title))
-    assert client.post('/api/analyses',json={'company_id':'demo-metal','event_id':event.id,'role':'CFO'}).status_code == 422
-    assert all(i['synthetic'] for i in client.get('/api/feed?company_id=demo-metal').json()['items'])
+    assert client.post('/api/analyses',json={'company_id':'demo-metal','event_id':event.id,'role':'CFO'}).status_code == 202
+    assert all(not i['synthetic'] for i in client.get('/api/feed?company_id=demo-metal').json()['items'])
+    assert all(i['synthetic'] for i in client.get('/api/feed?corpus=synthetic&company_id=demo-metal').json()['items'])
 
 
 def test_csv_upload_marks_synthetic_company_and_grants_only_importer(client, db):
@@ -205,5 +206,5 @@ def test_ssrf_rejected_before_network():
 
 
 def test_invalid_role_and_future_publication(client):
-    assert client.get('/api/feed?company_id=demo-metal&role=ADMIN').status_code == 422
+    assert client.get('/api/feed?corpus=synthetic&company_id=demo-metal&role=ADMIN').status_code == 422
     assert client.post('/api/admin/news',json={'title':'Будущее событие','content':'Текст будущей публикации, который не должен попасть в текущую ленту событий компании.', 'publisher':'Тест','published_at':(utcnow()+timedelta(days=5)).isoformat()}).status_code == 422

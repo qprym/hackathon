@@ -6,6 +6,7 @@ os.environ["DATABASE_URL"] = "sqlite:///" + str(Path(__file__).resolve().parent 
 os.environ["INLINE_WORKER"] = "false"
 os.environ["DEMO_MODE"] = "true"
 os.environ["SEED_DEMO"] = "true"
+os.environ["AUTO_FETCH_RSS"] = "false"
 
 from fastapi.testclient import TestClient
 from app.main import app

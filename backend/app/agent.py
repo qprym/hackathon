@@ -208,6 +208,10 @@ def run_agent(db, run):
         insight.limitations.append("Часть аналитики опубликована более 90 дней до события; это историческая позиция, ее актуальность требует проверки.")
     if any(e["synthetic"] for e in evidence):
         insight.limitations.append("Источники помечены как синтетические примеры и не отражают реальную позицию Альфа-Банка.")
+    if company.synthetic and not event.synthetic:
+        insight.limitations.append("Новость реальная, профиль компании учебный. Последствия показаны для демонстрационного профиля.")
+    if any(e.get("coverage") == "summary" for e in evidence):
+        insight.limitations.append("Для части источников доступна только RSS-аннотация; полного текста статьи в анализе нет.")
     result = insight.model_dump()
     result.update({"evidence": evidence, "context_features": context["features"], "verification": verification,
                    "mode": "demo" if settings().demo_mode else "live", "role": run.role,

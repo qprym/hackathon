@@ -35,6 +35,9 @@ def initialize_development_schema():
         columns = {column['name'] for column in inspect(connection).get_columns('runs')}
         if 'access_scope' not in columns:
             connection.execute(text("ALTER TABLE runs ADD COLUMN access_scope JSON NOT NULL DEFAULT '[]'"))
+        columns = {column['name'] for column in inspect(connection).get_columns('documents')}
+        if 'ingestion_meta' not in columns:
+            connection.execute(text("ALTER TABLE documents ADD COLUMN ingestion_meta JSON NOT NULL DEFAULT '{}'"))
 
 
 def get_db():

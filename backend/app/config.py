@@ -1,5 +1,6 @@
 from functools import lru_cache
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field
 
 
 APPROVED_MODELS = {
@@ -16,7 +17,9 @@ class Settings(BaseSettings):
     demo_password: str = "demo-alfa-2026"
     cookie_secure: bool = False
     inline_worker: bool = True
-    auto_fetch_rss: bool = False
+    auto_fetch_rss: bool = True
+    rss_refresh_seconds: int = Field(default=1800, ge=60, le=86400)
+    rss_item_limit: int = Field(default=50, ge=1, le=200)
     allowed_origins: str = "http://localhost:5173,http://localhost:8080"
     llm_base_url: str = ""
     llm_api_key: str = ""

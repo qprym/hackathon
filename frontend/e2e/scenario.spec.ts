@@ -7,6 +7,7 @@ test("login, personalized feed, evidence and company switch", async ({
   await expect(
     page.getByRole("heading", { name: "Новостная аналитика", exact: true }),
   ).toBeVisible();
+  await page.getByRole("button", { name: "Учебные события", exact: true }).click();
   await expect(page.locator(".event-card").first()).toBeVisible();
   await page.getByRole("button", { name: "Разобрать влияние" }).first().click();
   await expect(
@@ -54,6 +55,7 @@ test("unseen news is imported, analyzed and receives feedback", async ({ page })
   await page.getByRole("button", { name: "Загрузить и обработать" }).click();
   await expect(page.getByRole("heading", { name: "Результат обработки" })).toBeVisible();
   await page.getByRole("button", { name: "Новостная аналитика", exact: true }).click();
+  await page.getByRole("button", { name: "Учебные события", exact: true }).click();
   await page.getByRole("button", { name: title, exact: true }).click();
   await expect(page.getByText("ВЛИЯНИЕ НА ВАШ БИЗНЕС", { exact: true })).toBeVisible({ timeout: 30000 });
   await page.getByRole("button", { name: "Полезно", exact: true }).click();

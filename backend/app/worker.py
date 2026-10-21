@@ -1,6 +1,5 @@
 import logging
 import threading
-import time
 from datetime import timedelta
 from sqlalchemy import select, update
 from .agent import run_agent
@@ -57,23 +56,12 @@ def process_one():
 
 def work_loop(stop=None):
     stop = stop or threading.Event()
-    last_fetch = 0
+    if settings().auto_fetch_rss:
+        from .feeds import feed_loop
+        threading.Thread(target=feed_loop, args=(stop,), name="news-refresh", daemon=True).start()
     while not stop.is_set():
         try:
             busy = process_one()
-            if settings().auto_fetch_rss and not busy and time.monotonic() - last_fetch > 1800:
-                from .ingestion import FEEDS, import_feed
-                for key in FEEDS:
-                    with SessionLocal() as db:
-                        try:
-                            report = import_feed(db, key)
-                            db.add(Audit(action="rss", actor="worker", details={"source": key, **report}))
-                            db.commit()
-                        except Exception as exc:
-                            db.rollback()
-                            db.add(Audit(action="rss_error", actor="worker", details={"source": key, "type": type(exc).__name__}))
-                            db.commit()
-                last_fetch = time.monotonic()
         except Exception:
             log.exception("Worker iteration failed")
             busy = False

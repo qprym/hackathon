@@ -22,6 +22,8 @@ jobs:
         working-directory: frontend
   compose:
     runs-on: ubuntu-latest
+    env:
+      AUTO_FETCH_RSS: "false"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

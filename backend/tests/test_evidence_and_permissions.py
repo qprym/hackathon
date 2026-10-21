@@ -14,7 +14,7 @@ from app.worker import process_one
 
 
 def start(client):
-    event = client.get('/api/feed?company_id=demo-metal&role=CFO').json()['items'][0]
+    event = client.get('/api/feed?corpus=synthetic&company_id=demo-metal&role=CFO').json()['items'][0]
     response = client.post('/api/analyses', json={
         'company_id': 'demo-metal', 'event_id': event['id'], 'role': 'CFO'})
     assert response.status_code == 202

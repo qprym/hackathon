@@ -22,7 +22,9 @@ services:
       DEMO_PASSWORD: ${DEMO_PASSWORD:-demo-alfa-2026}
       INLINE_WORKER: "false"
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
-      AUTO_FETCH_RSS: ${AUTO_FETCH_RSS:-false}
+      AUTO_FETCH_RSS: ${AUTO_FETCH_RSS:-true}
+      RSS_REFRESH_SECONDS: ${RSS_REFRESH_SECONDS:-1800}
+      RSS_ITEM_LIMIT: ${RSS_ITEM_LIMIT:-50}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:8080,http://localhost:5173}
       LLM_BASE_URL: ${LLM_BASE_URL:-}
       LLM_API_KEY: ${LLM_API_KEY:-}

@@ -186,6 +186,20 @@
               ],
               "title": "Topic"
             }
+          },
+          {
+            "name": "corpus",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "real",
+                "synthetic"
+              ],
+              "type": "string",
+              "default": "real",
+              "title": "Corpus"
+            }
           }
         ],
         "responses": {
@@ -204,6 +218,22 @@
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
                 }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/feeds/status": {
+      "get": {
+        "summary": "Sources Status",
+        "operationId": "sources_status_api_feeds_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
               }
             }
           }

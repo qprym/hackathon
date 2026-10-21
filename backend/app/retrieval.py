@@ -113,7 +113,8 @@ def search_documents(db, query, kind=None, before=None, synthetic=False, limit=6
 def evidence(doc, index, chunk):
     return {"id": f"{doc.id}:{index}", "document_id": doc.id, "title": doc.title, "kind": doc.kind,
             "publisher": doc.publisher, "url": doc.url, "published_at": doc.published_at.isoformat() + "Z",
-            "excerpt": chunk["text"], "page": chunk.get("page"), "synthetic": doc.synthetic}
+            "excerpt": chunk["text"], "page": chunk.get("page"), "synthetic": doc.synthetic,
+            "coverage": doc.ingestion_meta.get("coverage", "provided")}
 
 
 def event_evidence(db, event):
