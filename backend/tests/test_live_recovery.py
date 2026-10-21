@@ -1,3 +1,4 @@
+from review_helpers import accepted_review, rejected_review, unchanged_patch
 from sqlalchemy import select
 from fastapi.testclient import TestClient
 from app.agent import model_grounds, restore_citations, validate_insight
@@ -52,6 +53,8 @@ def test_invalid_citation_skips_paid_review(client, db, monkeypatch):
     calls = []
     def fake_model(system, payload, **kwargs):
         calls.append(system)
+        if 'allowed_edits' in payload:
+            return unchanged_patch(payload)
         return {'headline': payload['event'], 'impact': [{'text': 'Условный сценарий', 'evidence_ids': ['E99'], 'assumption': True}]}
     monkeypatch.setattr(settings(), 'demo_mode', False)
     monkeypatch.setattr(agent, 'complete_json', fake_model)
@@ -85,7 +88,9 @@ def test_repair_uses_two_calls_and_cache_keeps_result(client, db, monkeypatch):
         calls.append(system)
         assert 'stale-context-must-not-be-used' not in str(payload)
         if 'Проверь, подтверждаются' in system:
-            return {'issues': [], 'search_queries': []}
+            return accepted_review(payload)
+        if 'allowed_edits' in payload:
+            return unchanged_patch(payload)
         assert 'output_schema' in payload
         assert payload['previous'] is None
         e = next(e for e in payload['evidence'] if e['kind'] == 'news')
@@ -122,11 +127,15 @@ def test_review_sees_features_and_correction_sees_current_draft(client, db, monk
     reviews = []
     def fake_model(system, payload, **kwargs):
         if 'Проверь, подтверждаются' in system:
-            assert payload['company_grounds']['impact'][0]['CL_PRODUCT_LOA_MARK']['value'] is True
+            assert payload['company_grounds']['impact.0']['CL_PRODUCT_LOA_MARK']['value'] is True
             reviews.append(payload)
-            return {'issues': ['Уточнить условие рефинансирования']} if len(reviews) == 1 else {'issues': []}
+            return rejected_review(payload) if len(reviews) == 1 else accepted_review(payload)
         drafts.append(payload)
+        if 'allowed_edits' in payload:
+            return unchanged_patch(payload)
         e = payload['evidence'][0]
+        if 'allowed_edits' in payload:
+            return unchanged_patch(payload)
         return {'headline': payload['event'], 'impact': [{'text': 'Если предстоит рефинансирование, уточните условия.',
             'evidence_ids': [e['id']], 'feature_keys': ['CL_PRODUCT_LOA_MARK'], 'assumption': True}]}
     monkeypatch.setattr(settings(), 'demo_mode', False)
@@ -138,7 +147,8 @@ def test_review_sees_features_and_correction_sees_current_draft(client, db, monk
     assert len(drafts) == len(reviews) == 2
     assert drafts[0]['draft_to_correct'] is None
     assert drafts[1]['draft_to_correct']['impact'][0]['text'].startswith('Если предстоит')
-    assert drafts[1]['corrections'] == ['Уточнить условие рефинансирования']
+    assert drafts[1]['allowed_edits'] == ['impact.0']
+    assert 'Уточнить условие рефинансирования' in drafts[1]['corrections'][0]
 
 
 def test_missing_review_verdict_never_passes(client, db, monkeypatch):
@@ -147,6 +157,8 @@ def test_missing_review_verdict_never_passes(client, db, monkeypatch):
     def fake_model(system, payload, **kwargs):
         if 'Проверь, подтверждаются' in system:
             return {}
+        if 'allowed_edits' in payload:
+            return unchanged_patch(payload)
         return {'headline': payload['event'], 'impact': [{'text': 'Если предстоит рефинансирование, проверьте условия.',
             'feature_keys': ['CL_PRODUCT_LOA_MARK'], 'assumption': True}]}
     monkeypatch.setattr(settings(), 'demo_mode', False)

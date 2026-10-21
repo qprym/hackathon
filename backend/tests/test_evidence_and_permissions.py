@@ -1,3 +1,4 @@
+from review_helpers import accepted_review, rejected_review, unchanged_patch
 from datetime import timedelta
 
 from fastapi.testclient import TestClient
@@ -39,7 +40,9 @@ def test_inaccessible_profiles_never_enter_live_model_context(client, db, monkey
         if 'Упорядочь' in system:
             return {'ordered_ids': []}
         if 'Проверь, подтверждаются' in system:
-            return {'issues': [], 'search_queries': []}
+            return accepted_review(payload)
+        if 'allowed_edits' in payload:
+            return unchanged_patch(payload)
         return {'headline': payload['event'], 'impact': [{
             'text': 'Проверьте условия кредитных договоров.',
             'evidence_ids': [payload['evidence'][0]['id']],

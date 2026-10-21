@@ -7,10 +7,20 @@ os.environ["INLINE_WORKER"] = "false"
 os.environ["DEMO_MODE"] = "true"
 os.environ["SEED_DEMO"] = "true"
 os.environ["AUTO_FETCH_RSS"] = "false"
+os.environ["LLM_API_KEY"] = "test-key-never-use-provider"
 
 from fastapi.testclient import TestClient
 from app.main import app
 from app.db import Base, engine, SessionLocal
+
+
+@pytest.fixture(autouse=True)
+def no_provider_network(monkeypatch):
+    # Gateway tests explicitly replace this function with their own transport fake.
+    import app.llm as llm
+    def forbidden(*args, **kwargs):
+        raise AssertionError('Tests must not call a paid LLM provider')
+    monkeypatch.setattr(llm.httpx, 'post', forbidden)
 
 
 @pytest.fixture(autouse=True)

@@ -51,10 +51,47 @@ class Insight(BaseModel):
     limitations: list[str] = Field(default_factory=list, max_length=15)
 
 
+class EvidenceQuote(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    evidence_id: str
+    quote: str = Field(min_length=3, max_length=900)
+
+
+class ReviewCheck(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    item_id: str
+    verdict: Literal['supported', 'unsupported', 'uncertain']
+    category: Literal['none', 'grounds', 'temporal', 'scope', 'causality', 'attribution', 'company', 'contradiction']
+    text_span: str = Field(min_length=3, max_length=1800)
+    reason: str = Field(min_length=10, max_length=1200)
+    quotes: list[EvidenceQuote] = Field(default_factory=list, max_length=12)
+    feature_keys: list[str] = Field(default_factory=list, max_length=12)
+    correction: str = Field(default='', max_length=900)
+    missing_feature_keys: list[str] = Field(default_factory=list, max_length=12)
+
+
+class ReviewNote(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    item_id: str
+    suggestion: str = Field(min_length=3, max_length=500)
+
+
 class Review(BaseModel):
     model_config = ConfigDict(extra='forbid')
-    issues: list[str] = Field(max_length=6)
+    checks: list[ReviewCheck] = Field(min_length=1, max_length=66)
+    editorial_notes: list[ReviewNote] = Field(default_factory=list, max_length=10)
     search_queries: list[str] = Field(default_factory=list, max_length=2)
+
+
+class ClaimEdit(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    item_id: str
+    replacement: Claim | str | None
+
+
+class InsightPatch(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    edits: list[ClaimEdit] = Field(min_length=1, max_length=66)
 
 
 class FeedbackInput(BaseModel):

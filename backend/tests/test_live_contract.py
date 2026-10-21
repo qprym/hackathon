@@ -1,3 +1,4 @@
+from review_helpers import accepted_review, rejected_review, unchanged_patch
 from app.config import settings
 from app.retrieval import classify
 from app.models import Event
@@ -27,7 +28,9 @@ def test_live_agent_contract_and_review_retry(client, db, monkeypatch):
             return {'ordered_ids':[e['id'] for e in payload['candidates']]}
         if 'Проверь, подтверждаются' in system:
             reviews[0] += 1
-            return {'issues':['Уточнить сценарий'] if reviews[0] == 1 else [], 'search_queries':['кредит ставка']}
+            return rejected_review(payload) if reviews[0] == 1 else accepted_review(payload)
+        if 'allowed_edits' in payload:
+            return unchanged_patch(payload)
         assert 'output_schema' in payload
         evidence = next(e for e in payload['evidence'] if e['kind']=='news')
         return {'headline':payload['event'], 'facts':[{'text':evidence['excerpt'],'evidence_ids':[evidence['id']]}],
