@@ -1,0 +1,60 @@
+from sqlalchemy import or_, select
+from .models import Company, Link
+
+PRODUCTS = {
+    "CL_PRODUCT_LOA_MARK": "Кредитные продукты", "CL_PRODUCT_DEP_MARK": "Депозиты",
+    "CL_PRODUCT_GAR_MARK": "Банковские гарантии", "CL_PRODUCT_LEA_MARK": "Лизинг",
+    "FACTORING_MARK": "Факторинг", "CL_PRODUCT_RKO_MARK": "РКО", "CL_PRODUCT_ZPP_MARK": "Зарплатный проект",
+}
+
+
+def feature(value, source, status="fact", label=None):
+    return {"value": value, "source": source, "status": status, "label": label or source}
+
+
+def value(company, key, default=None):
+    return company.features.get(key, {}).get("value", default)
+
+
+def company_context(db, company):
+    features = dict(company.features)
+    payments = db.scalars(select(Link).where(
+        Link.kind == "payment", or_(Link.source_id == company.id, Link.target_id == company.id)
+    )).all()
+    outgoing = [p for p in payments if p.source_id == company.id]
+    incoming = [p for p in payments if p.target_id == company.id]
+    total = sum(p.amount or 0 for p in outgoing)
+    if total:
+        concentration = round(max(p.amount or 0 for p in outgoing) / total, 4)
+        features["outgoing_concentration"] = feature(concentration,
+            "Сумма PAY_AMT по исходящим связям предоставленной выборки", "calculated", "Концентрация исходящих платежей")
+    features["counterparty_count"] = feature(len({p.target_id if p.source_id == company.id else p.source_id for p in payments}),
+        "Платежные связи в предоставленной выборке", "calculated", "Контрагенты в выборке")
+    related = []
+    for p in sorted(payments, key=lambda p: p.amount or 0, reverse=True)[:10]:
+        other_id = p.target_id if p.source_id == company.id else p.source_id
+        other = db.get(Company, other_id)
+        related.append({"id": other_id, "industry": other.industry if other else "Неизвестна",
+                        "region": other.region if other else "Неизвестен",
+                        "direction": "outgoing" if p.source_id == company.id else "incoming",
+                        "amount": p.amount, "count": p.count})
+    group = []
+    if company.group_id:
+        group = [{"id": c.id, "industry": c.industry} for c in db.scalars(
+            select(Company).where(Company.group_id == company.group_id)).all()]
+    persons = db.scalars(select(Link).where(Link.kind == "person", Link.target_id == company.id)).all()
+    shared_person_links = []
+    if persons:
+        shared_person_links = [{"company_id": l.target_id, "relation": "Общее обезличенное физическое лицо; тип связи неизвестен"}
+            for l in db.scalars(select(Link).where(Link.kind == "person",
+                Link.source_id.in_([p.source_id for p in persons]), Link.target_id != company.id)).all()]
+    missing = [label for key, label in [("REVENUE_COMPANY", "Выручка"), ("MAINOKVED_CODE", "ОКВЭД"), ("FTS_COUNTRY_NAME", "Страны из данных ФТС")]
+               if value(company, key) is None]
+    return {"id": company.id, "name": company.name, "industry": company.industry,
+            "region": company.region, "synthetic": company.synthetic, "features": features,
+            "products": [label for key, label in PRODUCTS.items() if value(company, key) is True],
+            "group": group, "counterparties": related, "shared_person_links": shared_person_links,
+            "missing": missing + ["Рыночная доля: нет данных об объеме рынка", "Суммы, ставки и сроки кредитов", "Направление внешней торговли и валюты контрактов"],
+            "payment_summary": {"incoming": sum(p.amount or 0 for p in incoming), "outgoing": total},
+            "limitations": ["Платежи описывают только предоставленный набор; период и полнота требуют проверки.",
+                            "Город регистрации не доказывает географию всех операций."]}

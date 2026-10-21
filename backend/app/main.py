@@ -1,0 +1,304 @@
+import hashlib
+import json
+import threading
+from contextlib import asynccontextmanager
+from datetime import datetime, timedelta
+from pathlib import Path
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from sqlalchemy import func, select, text
+from sqlalchemy.orm import Session
+from .auth import admin, authorize_company, current_user, make_session, token_hash, verify_password
+from .config import settings
+from .context import company_context
+from .db import Base, SessionLocal, engine, get_db, utcnow
+from .ingestion import FEEDS, extract_pdf, import_csv, import_document, import_feed
+from .models import Audit, AuthSession, Budget, Company, Document, Event, Feedback, Link, Run, Usage, User
+from .retrieval import TOPIC_NAMES, rank_event
+from .schemas import Analyze, FeedbackInput, Login, NewsInput, Question, Role
+from .seed import seed
+from .worker import work_loop
+
+
+@asynccontextmanager
+async def lifespan(app):
+    # Production PostgreSQL schema is owned by Alembic; SQLite is a development convenience.
+    if engine.dialect.name == "sqlite":
+        Base.metadata.create_all(engine)
+    if settings().seed_demo:
+        with SessionLocal() as db:
+            seed(db)
+    stop = threading.Event()
+    worker = None
+    if settings().inline_worker:
+        worker = threading.Thread(target=work_loop, args=(stop,), daemon=True)
+        worker.start()
+    yield
+    stop.set()
+    if worker:
+        worker.join(timeout=3)
+
+
+app = FastAPI(title="Альфа · Контекст", version="0.1.0", lifespan=lifespan)
+app.add_middleware(CORSMiddleware, allow_origins=settings().allowed_origins.split(","),
+                   allow_credentials=True, allow_methods=["GET", "POST"], allow_headers=["Content-Type", "X-Alfa-Request"])
+
+
+@app.middleware("http")
+async def browser_safety(request, call_next):
+    if request.method not in ("GET", "HEAD", "OPTIONS"):
+        # Custom header prevents cross-site form CSRF; CORS protects cross-origin scripted requests.
+        if request.headers.get("x-alfa-request") != "1":
+            return JSONResponse(
+                {"detail": "Отсутствует защитный заголовок запроса"}, status_code=403)
+        origin = request.headers.get("origin")
+        if origin and origin not in settings().allowed_origins.split(","):
+            return JSONResponse(
+                {"detail": "Источник запроса не разрешен"}, status_code=403)
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "same-origin"
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.get("/api/health")
+def health(db: Session = Depends(get_db)):
+    db.execute(text("SELECT 1"))
+    return {"status": "ok", "mode": "demo" if settings().demo_mode else "live", "version": "0.1.0"}
+
+
+def user_info(user):
+    return {"id": user.id, "name": user.name, "username": user.username,
+            "company_ids": user.company_ids, "is_admin": user.is_admin,
+            "mode": "demo" if settings().demo_mode else "live"}
+
+
+@app.post("/api/auth/login")
+def login(body: Login, request: Request, response: Response, db: Session = Depends(get_db)):
+    # Persisted limits also apply across process restarts; never trust X-Forwarded-For here.
+    actor = request.client.host if request.client else "unknown"
+    count = db.scalar(select(func.count()).select_from(Audit).where(Audit.action == "login_failed", Audit.actor == actor,
+        Audit.created_at > utcnow() - timedelta(minutes=10)))
+    if count >= 15:
+        raise HTTPException(429, "Слишком много попыток. Повторите через 10 минут.")
+    user = db.scalar(select(User).where(User.username == body.username))
+    if not user or not verify_password(body.password, user.password_hash):
+        db.add(Audit(action="login_failed", actor=actor, details={}))
+        db.commit()
+        raise HTTPException(401, "Неверный логин или пароль")
+    token = make_session(db, user)
+    response.set_cookie("alfa_session", token, httponly=True, secure=settings().cookie_secure,
+                        samesite="lax", max_age=43200, path="/")
+    return user_info(user)
+
+
+@app.post("/api/auth/logout")
+def logout(request: Request, response: Response, db: Session = Depends(get_db)):
+    session = db.get(AuthSession, token_hash(request.cookies.get("alfa_session", "")))
+    if session:
+        db.delete(session)
+        db.commit()
+    response.delete_cookie("alfa_session", path="/")
+    return {"ok": True}
+
+
+@app.get("/api/auth/me")
+def me(user: User = Depends(current_user)):
+    return user_info(user)
+
+
+@app.get("/api/companies")
+def companies(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    return [{"id": c.id, "name": c.name, "industry": c.industry, "region": c.region, "synthetic": c.synthetic}
+            for c in db.scalars(select(Company).where(Company.id.in_(user.company_ids))).all()]
+
+
+@app.get("/api/companies/{company_id}/context")
+def context(company_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    company = authorize_company(db, user, company_id)
+    result = company_context(db, company)
+    # Raw financial relationship data belonging to inaccessible companies stays server-side.
+    allowed = set(user.company_ids)
+    result["group"] = [g for g in result["group"] if g["id"] in allowed]
+    result["counterparties"] = [{**c, "id": c["id"] if c["id"] in allowed else "Связанный контрагент"} for c in result["counterparties"]]
+    result["shared_person_links"] = [l for l in result["shared_person_links"] if l["company_id"] in allowed]
+    return result
+
+
+@app.get("/api/feed")
+def feed(company_id: str, role: Role = "CFO", topic: str | None = None, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    company = authorize_company(db, user, company_id)
+    ctx = company_context(db, company)
+    events = db.scalars(select(Event).where(Event.synthetic == company.synthetic).order_by(Event.published_at.desc()).limit(500)).all()
+    entries = []
+    for event in events:
+        if topic and topic not in event.topics:
+            continue
+        doc = db.get(Document, event.document_ids[0]) if event.document_ids else None
+        ranking = rank_event(event, ctx, role)
+        entries.append({"id": event.id, "title": event.title, "topics": event.topics,
+            "published_at": event.published_at.isoformat() + "Z", "synthetic": event.synthetic,
+            "summary": doc.content[:230] if doc else "", "publisher": doc.publisher if doc else "",
+            "source_count": len(event.document_ids), **ranking})
+    entries.sort(key=lambda item: (item["score"], item["published_at"]), reverse=True)
+    return {"items": entries[:50], "topics": TOPIC_NAMES, "company_id": company_id, "role": role}
+
+
+def create_run(db, user, body, question=None, parent=None):
+    company = authorize_company(db, user, body.company_id)
+    event = db.get(Event, body.event_id)
+    if not event:
+        raise HTTPException(404, "Событие не найдено")
+    if event.synthetic != company.synthetic:
+        raise HTTPException(422, "Синтетические и реальные данные анализируются отдельно")
+    # Corpus and relationship versions invalidate previously generated explanations.
+    documents = db.execute(select(Document.id, Document.content_hash).where(Document.synthetic == event.synthetic)
+                           .order_by(Document.id)).all()
+    links = db.execute(select(Link.id, Link.amount, Link.count).order_by(Link.id)).all()
+    key = hashlib.sha256(json.dumps([user.id, body.model_dump(), company.features, str(company.updated_at),
+        [list(d) for d in documents], [list(l) for l in links], question, parent, settings().demo_mode,
+        settings().llm_analysis_id, "prompt-v2"], sort_keys=True, default=str).encode()).hexdigest()
+    existing = db.scalar(select(Run).where(Run.cache_key == key, Run.status.in_(["queued", "running", "completed"])).order_by(Run.created_at.desc()))
+    if existing:
+        return {"run_id": existing.id, "cached": existing.status == "completed"}
+    pending = db.scalar(select(func.count()).select_from(Run).where(Run.user_id == user.id, Run.status.in_(["queued", "running"])))
+    if pending >= 5:
+        raise HTTPException(429, "Дождитесь завершения текущих анализов")
+    run = Run(user_id=user.id, company_id=company.id, event_id=event.id, role=body.role,
+              question=question, parent_id=parent, cache_key=key)
+    db.add(run)
+    db.commit()
+    return {"run_id": run.id, "cached": False}
+
+
+@app.post("/api/analyses", status_code=202)
+def analyze(body: Analyze, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    return create_run(db, user, body)
+
+
+def authorized_run(db, user, run_id):
+    run = db.get(Run, run_id)
+    if not run or run.user_id != user.id or run.company_id not in user.company_ids:
+        raise HTTPException(404, "Анализ не найден")
+    return run
+
+
+@app.get("/api/runs/{run_id}")
+def get_run(run_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    run = authorized_run(db, user, run_id)
+    # Trace available to reviewers but cannot expose IDs of inaccessible related companies.
+    steps = [{**s, "details": {k: v for k, v in s["details"].items() if k != "counterparties"}} for s in run.trace]
+    return {"id": run.id, "status": run.status, "stage": run.stage, "trace": steps,
+            "result": run.result, "error": run.error, "question": run.question, "role": run.role,
+            "company_id": run.company_id, "event_id": run.event_id}
+
+
+@app.post("/api/insights/{run_id}/questions", status_code=202)
+def ask(run_id: str, body: Question, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    run = authorized_run(db, user, run_id)
+    if run.status != "completed":
+        raise HTTPException(409, "Основной анализ еще не завершен")
+    return create_run(db, user, Analyze(company_id=run.company_id, event_id=run.event_id, role=run.role), body.question, run.id)
+
+
+@app.post("/api/insights/{run_id}/feedback")
+def feedback(run_id: str, body: FeedbackInput, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    authorized_run(db, user, run_id)
+    record = db.scalar(select(Feedback).where(Feedback.run_id == run_id, Feedback.user_id == user.id))
+    if not record:
+        record = Feedback(run_id=run_id, user_id=user.id)
+        db.add(record)
+    record.category, record.comment = body.category, body.comment
+    db.commit()
+    return {"ok": True}
+
+
+@app.get("/api/sources/{source_id}")
+def source(source_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    doc = db.get(Document, source_id)
+    if not doc:
+        raise HTTPException(404, "Источник не найден")
+    return {"id": doc.id, "title": doc.title, "kind": doc.kind, "publisher": doc.publisher,
+            "url": doc.url, "published_at": doc.published_at.isoformat() + "Z", "content": doc.content,
+            "chunks": doc.chunks, "synthetic": doc.synthetic}
+
+
+@app.post("/api/admin/news")
+def add_news(body: NewsInput, user: User = Depends(admin), db: Session = Depends(get_db)):
+    try:
+        params = body.model_dump()
+        params["url"] = str(body.url) if body.url else None
+        doc, created = import_document(db, **params)
+        db.add(Audit(action="document_import", actor=user.id, details={"document_id": doc.id, "created": created}))
+        db.commit()
+        return {"document_id": doc.id, "created": created}
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@app.post("/api/admin/import/csv")
+async def upload_csv(file: UploadFile = File(...), synthetic: bool = Form(False), user: User = Depends(admin), db: Session = Depends(get_db)):
+    raw = await file.read(20_000_001)
+    if len(raw) > 20_000_000:
+        raise HTTPException(413, "Максимум 20 МБ")
+    try:
+        report = import_csv(db, raw, Path(file.filename or "data.csv").name, synthetic=synthetic)
+        user.company_ids = list(dict.fromkeys([*user.company_ids, *report["company_ids"]]))
+        db.add(Audit(action="csv_import", actor=user.id, details={k: v for k, v in report.items() if k != "company_ids"}))
+        db.commit()
+        return report
+    except (ValueError, UnicodeError) as exc:
+        db.rollback()
+        raise HTTPException(422, str(exc)) from exc
+
+
+@app.post("/api/admin/import/pdf")
+async def upload_pdf(file: UploadFile = File(...), title: str = Form(...), published_at: datetime = Form(...),
+    synthetic: bool = Form(False), user: User = Depends(admin), db: Session = Depends(get_db)):
+    raw = await file.read(20_000_001)
+    if len(raw) > 20_000_000:
+        raise HTTPException(413, "Максимум 20 МБ")
+    try:
+        content, chunks = extract_pdf(raw)
+        doc, created = import_document(db, title=title, content=content, chunks=chunks, kind="bank",
+            publisher="Синтетический пример" if synthetic else "Альфа-Банк · материалы кейса",
+            published_at=published_at, synthetic=synthetic)
+        return {"document_id": doc.id, "created": created,
+                "warning": "Извлечен текст. Графики и таблицы нужно сверить с оригиналом; выводы не опираются на нераспознанные изображения."}
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(422, "Не удалось импортировать PDF: " + (str(exc)[:200] if isinstance(exc, ValueError) else "проверьте формат")) from exc
+
+
+@app.post("/api/admin/feeds/{key}")
+def sync_feed(key: str, user: User = Depends(admin), db: Session = Depends(get_db)):
+    try:
+        report = import_feed(db, key)
+        db.add(Audit(action="rss", actor=user.id, details={"source": key, **report}))
+        db.commit()
+        return report
+    except Exception as exc:
+        db.rollback()
+        db.add(Audit(action="rss_error", actor=user.id, details={"source": key, "error_type": type(exc).__name__}))
+        db.commit()
+        raise HTTPException(502, "Источник недоступен или вернул неподдерживаемый формат") from exc
+
+
+@app.get("/api/admin/metrics")
+def metrics(user: User = Depends(admin), db: Session = Depends(get_db)):
+    statuses = dict(db.execute(select(Run.status, func.count()).group_by(Run.status)).all())
+    feedback_counts = dict(db.execute(select(Feedback.category, func.count()).group_by(Feedback.category)).all())
+    runs = db.scalars(select(Run).where(Run.status == "completed")).all()
+    durations = [(r.finished_at-r.created_at).total_seconds() for r in runs if r.finished_at]
+    return {"runs": statuses, "feedback": feedback_counts,
+        "budgets": [{"day": b.day, "spent_rub": round(b.spent, 4)} for b in db.scalars(select(Budget).order_by(Budget.day.desc()).limit(7))],
+        "latency_avg_seconds": round(sum(durations)/len(durations), 2) if durations else None,
+        "insufficient_count": sum(r.result.get("verification") == "insufficient" for r in runs if r.result),
+        "source_errors": db.scalar(select(func.count()).select_from(Audit).where(Audit.action == "rss_error")),
+        "documents": db.scalar(select(func.count()).select_from(Document)),
+        "events": db.scalar(select(func.count()).select_from(Event)),
+        "mode": "demo" if settings().demo_mode else "live",
+        "quality_note": "Метрики релевантности и достоверности требуют независимой экспертной разметки; здесь они не заявляются."}

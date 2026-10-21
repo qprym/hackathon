@@ -1,0 +1,4 @@
+SYNTHETIC_U;MAINOKVED_CODE;MAINOKVED_NAME;REVENUE_COMPANY;REGION;GROUP_ID;CL_PRODUCT_LOA_MARK;CL_PRODUCT_DEP_MARK;FTS_FLAG;FTS_COUNTRY_NAME
+sample-metal;25.11;Производство металлических изделий;28400000000;Свердловская область;sample-group;1;0;0;
+sample-retail;46.90;Оптовая и розничная торговля;19600000000;Москва;;0;1;1;Китай
+sample-logistics;52.29;Транспортировка и складское хранение;17200000000;Санкт-Петербург;sample-group;1;1;0;

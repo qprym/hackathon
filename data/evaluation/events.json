@@ -1,0 +1,1057 @@
+{
+  "status": "synthetic_unlabeled",
+  "reviewer": null,
+  "reviewed_at": null,
+  "events": [
+    {
+      "id": "eval-007",
+      "title": "Условия оборотных кредитов обновлены",
+      "content": "Синтетическая учебная публикация: условия оборотных кредитов обновлены. Условия и применимость к конкретной компании требуют проверки по договорам, географии и доступным признакам.",
+      "topics": [
+        "rates"
+      ],
+      "synthetic": true,
+      "split": "development",
+      "relevance": {
+        "demo-metal:CEO": null,
+        "demo-metal:CFO": null,
+        "demo-metal:TREASURER": null,
+        "demo-retail:CEO": null,
+        "demo-retail:CFO": null,
+        "demo-retail:TREASURER": null,
+        "demo-logistics:CEO": null,
+        "demo-logistics:CFO": null,
+        "demo-logistics:TREASURER": null
+      }
+    },
+    {
+      "id": "eval-014",
+      "title": "Грузовой терминал меняет расписание",
+      "content": "Синтетическая учебная публикация: грузовой терминал меняет расписание. Условия и применимость к конкретной компании требуют проверки по договорам, географии и доступным признакам.",
+      "topics": [
+        "logistics"
+      ],
+      "synthetic": true,
+      "split": "development",
+      "relevance": {
+        "demo-metal:CEO": null,
+        "demo-metal:CFO": null,
+        "demo-metal:TREASURER": null,
+        "demo-retail:CEO": null,
+        "demo-retail:CFO": null,
+        "demo-retail:TREASURER": null,
+        "demo-logistics:CEO": null,
+        "demo-logistics:CFO": null,
+        "demo-logistics:TREASURER": null
+      }
+    },
+    {
+      "id": "eval-021",
+      "title": "Сталь дорожает на региональном рынке",
+      "content": "Синтетическая учебная публикация: сталь дорожает на региональном рынке. Условия и применимость к конкретной компании требуют проверки по договорам, географии и доступным признакам.",
+      "topics": [
+        "commodities"
+      ],
+      "synthetic": true,
+      "split": "development",
+      "relevance": {
+        "demo-metal:CEO": null,
+        "demo-metal:CFO": null,
+        "demo-metal:TREASURER": null,
+        "demo-retail:CEO": null,
+        "demo-retail:CFO": null,
+        "demo-retail:TREASURER": null,
+        "demo-logistics:CEO": null,
+        "demo-logistics:CFO": null,
+        "demo-logistics:TREASURER": null
+      }
+    },
+    {
+      "id": "eval-028",
+      "title": "Оптовая торговля сообщает о новых заказах",
+      "content": "Синтетическая учебная публикация: оптовая торговля сообщает о новых заказах. Условия и применимость к конкретной компании требуют проверки по договорам, географии и доступным признакам.",
+      "topics": [
+        "demand"
+      ],
+      "synthetic": true,
+      "split": "development",
+      "relevance": {
+        "demo-metal:CEO": null,
+        "demo-metal:CFO": null,
+        "demo-metal:TREASURER": null,
+        "demo-retail:CEO": null,
+        "demo-retail:CFO": null,
+        "demo-retail:TREASURER": null,
+        "demo-logistics:CEO": null,
+        "demo-logistics:CFO": null,
+        "demo-logistics:TREASURER": null
+      }
+    },
+    {
+      "id": "eval-035",
+      "title": "Предложено изменить налоговый учет",
+      "content": "Синтетическая учебная публикация: предложено изменить налоговый учет. Условия и применимость к конкретной компании требуют проверки по договорам, географии и доступным признакам.",
+      "topics": [
+        "regulation"
+      ],
+      "synthetic": true,
+      "split": "development",
+      "relevance": {
+        "demo-metal:CEO": null,
+        "demo-metal:CFO": null,
+        "demo-metal:TREASURER": null,
+        "demo-retail:CEO": null,
+        "demo-retail:CFO": null,
+        "demo-retail:TREASURER": null,
+        "demo-logistics:CEO": null,
+        "demo-logistics:CFO": null,
+        "demo-logistics:TREASURER": null
+      }
+    },
+    {
+      "id": "eval-042",
+      "title": "Потребность в сезонных кадрах изменилась",
+      "content": "Синтетическая учебная публикация: потребность в сезонных кадрах изменилась. Условия и применимость к конкретной компании требуют проверки по договорам, географии и доступным признакам.",
+      "topics": [
+        "labor"
+      ],
+      "synthetic": true,
+      "split": "development",
+      "relevance": {
+        "demo-metal:CEO": null,
+        "demo-metal:CFO": null,
+        "demo-metal:TREASURER": null,
+        "demo-retail:CEO": null,
+        "demo-retail:CFO": null,
+        "demo-retail:TREASURER": null,
+        "demo-logistics:CEO": null,
+        "demo-logistics:CFO": null,
+        "demo-logistics:TREASURER": null
+      }
+    },
+    {
+      "id": "eval-049",
+      "title": "Компании меняют платежный календарь",
+      "content": "Синтетическая учебная публикация: компании меняют платежный календарь. Условия и применимость к конкретной компании требуют проверки по договорам, географии и доступным признакам.",
+      "topics": [
+        "liquidity"
+      ],
+      "synthetic": true,
+      "split": "development",
+      "relevance": {
+        "demo-metal:CEO": null,
+        "demo-metal:CFO": null,
+        "demo-metal:TREASURER": null,
+        "demo-retail:CEO": null,
+        "demo-retail:CFO": null,
+        "demo-retail:TREASURER": null,
+        "demo-logistics:CEO": null,
+        "demo-logistics:CFO": null,
+        "demo-logistics:TREASURER": null
+      }
+    },
+    {
+      "id": "eval-001",
+      "title": "Ключевая ставка сохранена",
+      "content": "Синтетическая учебная публикация: ключевая ставка сохранена. Условия и применимость к конкретной компании требуют проверки по договорам, географии и доступным признакам.",
+      "topics": [
+        "rates"
+      ],
+      "synthetic": true,
+      "split": "development",
+      "relevance": {
+        "demo-metal:CEO": null,
+        "demo-metal:CFO": null,
+        "demo-metal:TREASURER": null,
+        "demo-retail:CEO": null,
+        "demo-retail:CFO": null,
+        "demo-retail:TREASURER": null,
+        "demo-logistics:CEO": null,
+        "demo-logistics:CFO": null,
+        "demo-logistics:TREASURER": null
+      }
+    },
+    {
+      "id": "eval-008",
+      "title": "Увеличены сроки трансграничных расчетов",
+      "content": "Синтетическая учебная публикация: увеличены сроки трансграничных расчетов. Условия и применимость к конкретной компании требуют проверки по договорам, географии и доступным признакам.",
+      "topics": [
+        "fx"
+      ],
+      "synthetic": true,
+      "split": "development",
+      "relevance": {
+        "demo-metal:CEO": null,
+        "demo-metal:CFO": null,
+        "demo-metal:TREASURER": null,
+        "demo-retail:CEO": null,
+        "demo-retail:CFO": null,
+        "demo-retail:TREASURER": null,
+        "demo-logistics:CEO": null,
+        "demo-logistics:CFO": null,
+        "demo-logistics:TREASURER": null
+      }
+    },
+    {
+      "id": "eval-015",
+      "title": "Перевозки задерживаются на одном маршруте",
+      "content": "Синтетическая учебная публикация: перевозки задерживаются на одном маршруте. Условия и применимость к конкретной компании требуют проверки по договорам, географии и доступным признакам.",
+      "topics": [
+        "logistics"
+      ],
+      "synthetic": true,
+      "split": "development",
+      "relevance": {
+        "demo-metal:CEO": null,
+        "demo-metal:CFO": null,
+        "demo-metal:TREASURER": null,
+        "demo-retail:CEO": null,
+        "demo-retail:CFO": null,
+        "demo-retail:TREASURER": null,
+        "demo-logistics:CEO": null,
+        "demo-logistics:CFO": null,
+        "demo-logistics:TREASURER": null
+      }
+    },
+    {
+      "id": "eval-022",
+      "title": "Металлургические предприятия меняют графики",
+      "content": "Синтетическая учебная публикация: металлургические предприятия меняют графики. Условия и применимость к конкретной компании требуют проверки по договорам, географии и доступным признакам.",
+      "topics": [
+        "commodities"
+      ],
+      "synthetic": true,
+      "split": "development",
+      "relevance": {
+        "demo-metal:CEO": null,
+        "demo-metal:CFO": null,
+        "demo-metal:TREASURER": null,
+        "demo-retail:CEO": null,
+        "demo-retail:CFO": null,
+        "demo-retail:TREASURER": null,
+        "demo-logistics:CEO": null,
+        "demo-logistics:CFO": null,
+        "demo-logistics:TREASURER": null
+      }
+    },
+    {
+      "id": "eval-029",
+      "title": "Потребление услуг замедляется",
+      "content": "Синтетическая учебная публикация: потребление услуг замедляется. Условия и применимость к конкретной компании требуют проверки по договорам, географии и доступным признакам.",
+      "topics": [
+        "demand"
+      ],
+      "synthetic": true,
+      "split": "development",
+      "relevance": {
+        "demo-metal:CEO": null,
+        "demo-metal:CFO": null,
+        "demo-metal:TREASURER": null,
+        "demo-retail:CEO": null,
+        "demo-retail:CFO": null,
+        "demo-retail:TREASURER": null,
+        "demo-logistics:CEO": null,
+        "demo-logistics:CFO": null,
+        "demo-logistics:TREASURER": null
+      }
+    },
+    {
+      "id": "eval-036",
+      "title": "Регулятор выпустил разъяснение",
+      "content": "Синтетическая учебная публикация: регулятор выпустил разъяснение. Условия и применимость к конкретной компании требуют проверки по договорам, географии и доступным признакам.",
+      "topics": [
+        "regulation"
+      ],
+      "synthetic": true,
+      "split": "development",
+      "relevance": {
+        "demo-metal:CEO": null,
+        "demo-metal:CFO": null,
+        "demo-metal:TREASURER": null,
+        "demo-retail:CEO": null,
+        "demo-retail:CFO": null,
+        "demo-retail:TREASURER": null,
+        "demo-logistics:CEO": null,
+        "demo-logistics:CFO": null,
+        "demo-logistics:TREASURER": null
+      }
+    },
+    {
+      "id": "eval-043",
+      "title": "Рынок труда стал менее напряженным",
+      "content": "Синтетическая учебная публикация: рынок труда стал менее напряженным. Условия и применимость к конкретной компании требуют проверки по договорам, географии и доступным признакам.",
+      "topics": [
+        "labor"
+      ],
+      "synthetic": true,
+      "split": "development",
+      "relevance": {
+        "demo-metal:CEO": null,
+        "demo-metal:CFO": null,
+        "demo-metal:TREASURER": null,
+        "demo-retail:CEO": null,
+        "demo-retail:CFO": null,
+        "demo-retail:TREASURER": null,
+        "demo-logistics:CEO": null,
+        "demo-logistics:CFO": null,
+        "demo-logistics:TREASURER": null
+      }
+    },
+    {
+      "id": "eval-050",
+      "title": "Ликвидность банковского сектора увеличилась",
+      "content": "Синтетическая учебная публикация: ликвидность банковского сектора увеличилась. Условия и применимость к конкретной компании требуют проверки по договорам, географии и доступным признакам.",
+      "topics": [
+        "liquidity"
+      ],
+      "synthetic": true,
+      "split": "development",
+      "relevance": {
+        "demo-metal:CEO": null,
+        "demo-metal:CFO": null,
+        "demo-metal:TREASURER": null,
+        "demo-retail:CEO": null,
+        "demo-retail:CFO": null,
+        "demo-retail:TREASURER": null,
+        "demo-logistics:CEO": null,
+        "demo-logistics:CFO": null,
+        "demo-logistics:TREASURER": null
+      }
+    },
+    {
+      "id": "eval-002",
+      "title": "Изменились предложения кредитования",
+      "content": "Синтетическая учебная публикация: изменились предложения кредитования. Условия и применимость к конкретной компании требуют проверки по договорам, географии и доступным признакам.",
+      "topics": [
+        "rates"
+      ],
+      "synthetic": true,
+      "split": "development",
+      "relevance": {
+        "demo-metal:CEO": null,
+        "demo-metal:CFO": null,
+        "demo-metal:TREASURER": null,
+        "demo-retail:CEO": null,
+        "demo-retail:CFO": null,
+        "demo-retail:TREASURER": null,
+        "demo-logistics:CEO": null,
+        "demo-logistics:CFO": null,
+        "demo-logistics:TREASURER": null
+      }
+    },
+    {
+      "id": "eval-009",
+      "title": "Курс расчетной валюты изменился",
+      "content": "Синтетическая учебная публикация: курс расчетной валюты изменился. Условия и применимость к конкретной компании требуют проверки по договорам, географии и доступным признакам.",
+      "topics": [
+        "fx"
+      ],
+      "synthetic": true,
+      "split": "development",
+      "relevance": {
+        "demo-metal:CEO": null,
+        "demo-metal:CFO": null,
+        "demo-metal:TREASURER": null,
+        "demo-retail:CEO": null,
+        "demo-retail:CFO": null,
+        "demo-retail:TREASURER": null,
+        "demo-logistics:CEO": null,
+        "demo-logistics:CFO": null,
+        "demo-logistics:TREASURER": null
+      }
+    },
+    {
+      "id": "eval-016",
+      "title": "Складские мощности расширены",
+      "content": "Синтетическая учебная публикация: складские мощности расширены. Условия и применимость к конкретной компании требуют проверки по договорам, географии и доступным признакам.",
+      "topics": [
+        "logistics"
+      ],
+      "synthetic": true,
+      "split": "development",
+      "relevance": {
+        "demo-metal:CEO": null,
+        "demo-metal:CFO": null,
+        "demo-metal:TREASURER": null,
+        "demo-retail:CEO": null,
+        "demo-retail:CFO": null,
+        "demo-retail:TREASURER": null,
+        "demo-logistics:CEO": null,
+        "demo-logistics:CFO": null,
+        "demo-logistics:TREASURER": null
+      }
+    },
+    {
+      "id": "eval-023",
+      "title": "Стоимость энергоносителей снижается",
+      "content": "Синтетическая учебная публикация: стоимость энергоносителей снижается. Условия и применимость к конкретной компании требуют проверки по договорам, географии и доступным признакам.",
+      "topics": [
+        "commodities"
+      ],
+      "synthetic": true,
+      "split": "development",
+      "relevance": {
+        "demo-metal:CEO": null,
+        "demo-metal:CFO": null,
+        "demo-metal:TREASURER": null,
+        "demo-retail:CEO": null,
+        "demo-retail:CFO": null,
+        "demo-retail:TREASURER": null,
+        "demo-logistics:CEO": null,
+        "demo-logistics:CFO": null,
+        "demo-logistics:TREASURER": null
+      }
+    },
+    {
+      "id": "eval-030",
+      "title": "Покупатели смещаются в бюджетный сегмент",
+      "content": "Синтетическая учебная публикация: покупатели смещаются в бюджетный сегмент. Условия и применимость к конкретной компании требуют проверки по договорам, географии и доступным признакам.",
+      "topics": [
+        "demand"
+      ],
+      "synthetic": true,
+      "split": "development",
+      "relevance": {
+        "demo-metal:CEO": null,
+        "demo-metal:CFO": null,
+        "demo-metal:TREASURER": null,
+        "demo-retail:CEO": null,
+        "demo-retail:CFO": null,
+        "demo-retail:TREASURER": null,
+        "demo-logistics:CEO": null,
+        "demo-logistics:CFO": null,
+        "demo-logistics:TREASURER": null
+      }
+    },
+    {
+      "id": "eval-037",
+      "title": "Установлен переходный период для отчетности",
+      "content": "Синтетическая учебная публикация: установлен переходный период для отчетности. Условия и применимость к конкретной компании требуют проверки по договорам, географии и доступным признакам.",
+      "topics": [
+        "regulation"
+      ],
+      "synthetic": true,
+      "split": "development",
+      "relevance": {
+        "demo-metal:CEO": null,
+        "demo-metal:CFO": null,
+        "demo-metal:TREASURER": null,
+        "demo-retail:CEO": null,
+        "demo-retail:CFO": null,
+        "demo-retail:TREASURER": null,
+        "demo-logistics:CEO": null,
+        "demo-logistics:CFO": null,
+        "demo-logistics:TREASURER": null
+      }
+    },
+    {
+      "id": "eval-044",
+      "title": "Сезонные платежи сконцентрированы",
+      "content": "Синтетическая учебная публикация: сезонные платежи сконцентрированы. Условия и применимость к конкретной компании требуют проверки по договорам, географии и доступным признакам.",
+      "topics": [
+        "liquidity"
+      ],
+      "synthetic": true,
+      "split": "development",
+      "relevance": {
+        "demo-metal:CEO": null,
+        "demo-metal:CFO": null,
+        "demo-metal:TREASURER": null,
+        "demo-retail:CEO": null,
+        "demo-retail:CFO": null,
+        "demo-retail:TREASURER": null,
+        "demo-logistics:CEO": null,
+        "demo-logistics:CFO": null,
+        "demo-logistics:TREASURER": null
+      }
+    },
+    {
+      "id": "eval-003",
+      "title": "Компании пересматривают сроки рефинансирования",
+      "content": "Синтетическая учебная публикация: компании пересматривают сроки рефинансирования. Условия и применимость к конкретной компании требуют проверки по договорам, географии и доступным признакам.",
+      "topics": [
+        "rates"
+      ],
+      "synthetic": true,
+      "split": "development",
+      "relevance": {
+        "demo-metal:CEO": null,
+        "demo-metal:CFO": null,
+        "demo-metal:TREASURER": null,
+        "demo-retail:CEO": null,
+        "demo-retail:CFO": null,
+        "demo-retail:TREASURER": null,
+        "demo-logistics:CEO": null,
+        "demo-logistics:CFO": null,
+        "demo-logistics:TREASURER": null
+      }
+    },
+    {
+      "id": "eval-010",
+      "title": "Появился дополнительный маршрут платежей",
+      "content": "Синтетическая учебная публикация: появился дополнительный маршрут платежей. Условия и применимость к конкретной компании требуют проверки по договорам, географии и доступным признакам.",
+      "topics": [
+        "fx"
+      ],
+      "synthetic": true,
+      "split": "development",
+      "relevance": {
+        "demo-metal:CEO": null,
+        "demo-metal:CFO": null,
+        "demo-metal:TREASURER": null,
+        "demo-retail:CEO": null,
+        "demo-retail:CFO": null,
+        "demo-retail:TREASURER": null,
+        "demo-logistics:CEO": null,
+        "demo-logistics:CFO": null,
+        "demo-logistics:TREASURER": null
+      }
+    },
+    {
+      "id": "eval-017",
+      "title": "Транспортный тариф пересмотрен",
+      "content": "Синтетическая учебная публикация: транспортный тариф пересмотрен. Условия и применимость к конкретной компании требуют проверки по договорам, географии и доступным признакам.",
+      "topics": [
+        "logistics"
+      ],
+      "synthetic": true,
+      "split": "development",
+      "relevance": {
+        "demo-metal:CEO": null,
+        "demo-metal:CFO": null,
+        "demo-metal:TREASURER": null,
+        "demo-retail:CEO": null,
+        "demo-retail:CFO": null,
+        "demo-retail:TREASURER": null,
+        "demo-logistics:CEO": null,
+        "demo-logistics:CFO": null,
+        "demo-logistics:TREASURER": null
+      }
+    },
+    {
+      "id": "eval-024",
+      "title": "Предложение цветных металлов расширяется",
+      "content": "Синтетическая учебная публикация: предложение цветных металлов расширяется. Условия и применимость к конкретной компании требуют проверки по договорам, географии и доступным признакам.",
+      "topics": [
+        "commodities"
+      ],
+      "synthetic": true,
+      "split": "development",
+      "relevance": {
+        "demo-metal:CEO": null,
+        "demo-metal:CFO": null,
+        "demo-metal:TREASURER": null,
+        "demo-retail:CEO": null,
+        "demo-retail:CFO": null,
+        "demo-retail:TREASURER": null,
+        "demo-logistics:CEO": null,
+        "demo-logistics:CFO": null,
+        "demo-logistics:TREASURER": null
+      }
+    },
+    {
+      "id": "eval-031",
+      "title": "Промышленные заказы становятся сезонными",
+      "content": "Синтетическая учебная публикация: промышленные заказы становятся сезонными. Условия и применимость к конкретной компании требуют проверки по договорам, географии и доступным признакам.",
+      "topics": [
+        "demand"
+      ],
+      "synthetic": true,
+      "split": "development",
+      "relevance": {
+        "demo-metal:CEO": null,
+        "demo-metal:CFO": null,
+        "demo-metal:TREASURER": null,
+        "demo-retail:CEO": null,
+        "demo-retail:CFO": null,
+        "demo-retail:TREASURER": null,
+        "demo-logistics:CEO": null,
+        "demo-logistics:CFO": null,
+        "demo-logistics:TREASURER": null
+      }
+    },
+    {
+      "id": "eval-038",
+      "title": "Дефицит технических кадров растет",
+      "content": "Синтетическая учебная публикация: дефицит технических кадров растет. Условия и применимость к конкретной компании требуют проверки по договорам, географии и доступным признакам.",
+      "topics": [
+        "labor"
+      ],
+      "synthetic": true,
+      "split": "development",
+      "relevance": {
+        "demo-metal:CEO": null,
+        "demo-metal:CFO": null,
+        "demo-metal:TREASURER": null,
+        "demo-retail:CEO": null,
+        "demo-retail:CFO": null,
+        "demo-retail:TREASURER": null,
+        "demo-logistics:CEO": null,
+        "demo-logistics:CFO": null,
+        "demo-logistics:TREASURER": null
+      }
+    },
+    {
+      "id": "eval-045",
+      "title": "Сроки оплаты контрагентов увеличились",
+      "content": "Синтетическая учебная публикация: сроки оплаты контрагентов увеличились. Условия и применимость к конкретной компании требуют проверки по договорам, географии и доступным признакам.",
+      "topics": [
+        "liquidity"
+      ],
+      "synthetic": true,
+      "split": "development",
+      "relevance": {
+        "demo-metal:CEO": null,
+        "demo-metal:CFO": null,
+        "demo-metal:TREASURER": null,
+        "demo-retail:CEO": null,
+        "demo-retail:CFO": null,
+        "demo-retail:TREASURER": null,
+        "demo-logistics:CEO": null,
+        "demo-logistics:CFO": null,
+        "demo-logistics:TREASURER": null
+      }
+    },
+    {
+      "id": "eval-004",
+      "title": "Доходность депозитов меняется",
+      "content": "Синтетическая учебная публикация: доходность депозитов меняется. Условия и применимость к конкретной компании требуют проверки по договорам, географии и доступным признакам.",
+      "topics": [
+        "rates"
+      ],
+      "synthetic": true,
+      "split": "development",
+      "relevance": {
+        "demo-metal:CEO": null,
+        "demo-metal:CFO": null,
+        "demo-metal:TREASURER": null,
+        "demo-retail:CEO": null,
+        "demo-retail:CFO": null,
+        "demo-retail:TREASURER": null,
+        "demo-logistics:CEO": null,
+        "demo-logistics:CFO": null,
+        "demo-logistics:TREASURER": null
+      }
+    },
+    {
+      "id": "eval-011",
+      "title": "Экспортеры пересматривают валюту контрактов",
+      "content": "Синтетическая учебная публикация: экспортеры пересматривают валюту контрактов. Условия и применимость к конкретной компании требуют проверки по договорам, географии и доступным признакам.",
+      "topics": [
+        "fx"
+      ],
+      "synthetic": true,
+      "split": "holdout",
+      "relevance": {
+        "demo-metal:CEO": null,
+        "demo-metal:CFO": null,
+        "demo-metal:TREASURER": null,
+        "demo-retail:CEO": null,
+        "demo-retail:CFO": null,
+        "demo-retail:TREASURER": null,
+        "demo-logistics:CEO": null,
+        "demo-logistics:CFO": null,
+        "demo-logistics:TREASURER": null
+      }
+    },
+    {
+      "id": "eval-018",
+      "title": "Новый портовый маршрут открыт",
+      "content": "Синтетическая учебная публикация: новый портовый маршрут открыт. Условия и применимость к конкретной компании требуют проверки по договорам, географии и доступным признакам.",
+      "topics": [
+        "logistics"
+      ],
+      "synthetic": true,
+      "split": "holdout",
+      "relevance": {
+        "demo-metal:CEO": null,
+        "demo-metal:CFO": null,
+        "demo-metal:TREASURER": null,
+        "demo-retail:CEO": null,
+        "demo-retail:CFO": null,
+        "demo-retail:TREASURER": null,
+        "demo-logistics:CEO": null,
+        "demo-logistics:CFO": null,
+        "demo-logistics:TREASURER": null
+      }
+    },
+    {
+      "id": "eval-025",
+      "title": "Запасы сырья на складах растут",
+      "content": "Синтетическая учебная публикация: запасы сырья на складах растут. Условия и применимость к конкретной компании требуют проверки по договорам, географии и доступным признакам.",
+      "topics": [
+        "commodities"
+      ],
+      "synthetic": true,
+      "split": "holdout",
+      "relevance": {
+        "demo-metal:CEO": null,
+        "demo-metal:CFO": null,
+        "demo-metal:TREASURER": null,
+        "demo-retail:CEO": null,
+        "demo-retail:CFO": null,
+        "demo-retail:TREASURER": null,
+        "demo-logistics:CEO": null,
+        "demo-logistics:CFO": null,
+        "demo-logistics:TREASURER": null
+      }
+    },
+    {
+      "id": "eval-032",
+      "title": "Опубликован проект новых правил отчетности",
+      "content": "Синтетическая учебная публикация: опубликован проект новых правил отчетности. Условия и применимость к конкретной компании требуют проверки по договорам, географии и доступным признакам.",
+      "topics": [
+        "regulation"
+      ],
+      "synthetic": true,
+      "split": "holdout",
+      "relevance": {
+        "demo-metal:CEO": null,
+        "demo-metal:CFO": null,
+        "demo-metal:TREASURER": null,
+        "demo-retail:CEO": null,
+        "demo-retail:CFO": null,
+        "demo-retail:TREASURER": null,
+        "demo-logistics:CEO": null,
+        "demo-logistics:CFO": null,
+        "demo-logistics:TREASURER": null
+      }
+    },
+    {
+      "id": "eval-039",
+      "title": "Сроки найма специалистов увеличились",
+      "content": "Синтетическая учебная публикация: сроки найма специалистов увеличились. Условия и применимость к конкретной компании требуют проверки по договорам, географии и доступным признакам.",
+      "topics": [
+        "labor"
+      ],
+      "synthetic": true,
+      "split": "holdout",
+      "relevance": {
+        "demo-metal:CEO": null,
+        "demo-metal:CFO": null,
+        "demo-metal:TREASURER": null,
+        "demo-retail:CEO": null,
+        "demo-retail:CFO": null,
+        "demo-retail:TREASURER": null,
+        "demo-logistics:CEO": null,
+        "demo-logistics:CFO": null,
+        "demo-logistics:TREASURER": null
+      }
+    },
+    {
+      "id": "eval-046",
+      "title": "Оборотный капитал требует пересмотра",
+      "content": "Синтетическая учебная публикация: оборотный капитал требует пересмотра. Условия и применимость к конкретной компании требуют проверки по договорам, географии и доступным признакам.",
+      "topics": [
+        "liquidity"
+      ],
+      "synthetic": true,
+      "split": "holdout",
+      "relevance": {
+        "demo-metal:CEO": null,
+        "demo-metal:CFO": null,
+        "demo-metal:TREASURER": null,
+        "demo-retail:CEO": null,
+        "demo-retail:CFO": null,
+        "demo-retail:TREASURER": null,
+        "demo-logistics:CEO": null,
+        "demo-logistics:CFO": null,
+        "demo-logistics:TREASURER": null
+      }
+    },
+    {
+      "id": "eval-005",
+      "title": "Фиксированные ставки обсуждаются рынком",
+      "content": "Синтетическая учебная публикация: фиксированные ставки обсуждаются рынком. Условия и применимость к конкретной компании требуют проверки по договорам, географии и доступным признакам.",
+      "topics": [
+        "rates"
+      ],
+      "synthetic": true,
+      "split": "holdout",
+      "relevance": {
+        "demo-metal:CEO": null,
+        "demo-metal:CFO": null,
+        "demo-metal:TREASURER": null,
+        "demo-retail:CEO": null,
+        "demo-retail:CFO": null,
+        "demo-retail:TREASURER": null,
+        "demo-logistics:CEO": null,
+        "demo-logistics:CFO": null,
+        "demo-logistics:TREASURER": null
+      }
+    },
+    {
+      "id": "eval-012",
+      "title": "Импортные расчеты требуют новых документов",
+      "content": "Синтетическая учебная публикация: импортные расчеты требуют новых документов. Условия и применимость к конкретной компании требуют проверки по договорам, географии и доступным признакам.",
+      "topics": [
+        "fx"
+      ],
+      "synthetic": true,
+      "split": "holdout",
+      "relevance": {
+        "demo-metal:CEO": null,
+        "demo-metal:CFO": null,
+        "demo-metal:TREASURER": null,
+        "demo-retail:CEO": null,
+        "demo-retail:CFO": null,
+        "demo-retail:TREASURER": null,
+        "demo-logistics:CEO": null,
+        "demo-logistics:CFO": null,
+        "demo-logistics:TREASURER": null
+      }
+    },
+    {
+      "id": "eval-019",
+      "title": "Поставки оборудования требуют большего срока",
+      "content": "Синтетическая учебная публикация: поставки оборудования требуют большего срока. Условия и применимость к конкретной компании требуют проверки по договорам, географии и доступным признакам.",
+      "topics": [
+        "logistics"
+      ],
+      "synthetic": true,
+      "split": "holdout",
+      "relevance": {
+        "demo-metal:CEO": null,
+        "demo-metal:CFO": null,
+        "demo-metal:TREASURER": null,
+        "demo-retail:CEO": null,
+        "demo-retail:CFO": null,
+        "demo-retail:TREASURER": null,
+        "demo-logistics:CEO": null,
+        "demo-logistics:CFO": null,
+        "demo-logistics:TREASURER": null
+      }
+    },
+    {
+      "id": "eval-026",
+      "title": "Спрос на базовые товары увеличился",
+      "content": "Синтетическая учебная публикация: спрос на базовые товары увеличился. Условия и применимость к конкретной компании требуют проверки по договорам, географии и доступным признакам.",
+      "topics": [
+        "demand"
+      ],
+      "synthetic": true,
+      "split": "holdout",
+      "relevance": {
+        "demo-metal:CEO": null,
+        "demo-metal:CFO": null,
+        "demo-metal:TREASURER": null,
+        "demo-retail:CEO": null,
+        "demo-retail:CFO": null,
+        "demo-retail:TREASURER": null,
+        "demo-logistics:CEO": null,
+        "demo-logistics:CFO": null,
+        "demo-logistics:TREASURER": null
+      }
+    },
+    {
+      "id": "eval-033",
+      "title": "Обсуждается изменение пошлин",
+      "content": "Синтетическая учебная публикация: обсуждается изменение пошлин. Условия и применимость к конкретной компании требуют проверки по договорам, географии и доступным признакам.",
+      "topics": [
+        "regulation"
+      ],
+      "synthetic": true,
+      "split": "holdout",
+      "relevance": {
+        "demo-metal:CEO": null,
+        "demo-metal:CFO": null,
+        "demo-metal:TREASURER": null,
+        "demo-retail:CEO": null,
+        "demo-retail:CFO": null,
+        "demo-retail:TREASURER": null,
+        "demo-logistics:CEO": null,
+        "demo-logistics:CFO": null,
+        "demo-logistics:TREASURER": null
+      }
+    },
+    {
+      "id": "eval-040",
+      "title": "Работодатели пересматривают зарплаты",
+      "content": "Синтетическая учебная публикация: работодатели пересматривают зарплаты. Условия и применимость к конкретной компании требуют проверки по договорам, географии и доступным признакам.",
+      "topics": [
+        "labor"
+      ],
+      "synthetic": true,
+      "split": "holdout",
+      "relevance": {
+        "demo-metal:CEO": null,
+        "demo-metal:CFO": null,
+        "demo-metal:TREASURER": null,
+        "demo-retail:CEO": null,
+        "demo-retail:CFO": null,
+        "demo-retail:TREASURER": null,
+        "demo-logistics:CEO": null,
+        "demo-logistics:CFO": null,
+        "demo-logistics:TREASURER": null
+      }
+    },
+    {
+      "id": "eval-047",
+      "title": "Входящие платежи сдвинулись",
+      "content": "Синтетическая учебная публикация: входящие платежи сдвинулись. Условия и применимость к конкретной компании требуют проверки по договорам, географии и доступным признакам.",
+      "topics": [
+        "liquidity"
+      ],
+      "synthetic": true,
+      "split": "holdout",
+      "relevance": {
+        "demo-metal:CEO": null,
+        "demo-metal:CFO": null,
+        "demo-metal:TREASURER": null,
+        "demo-retail:CEO": null,
+        "demo-retail:CFO": null,
+        "demo-retail:TREASURER": null,
+        "demo-logistics:CEO": null,
+        "demo-logistics:CFO": null,
+        "demo-logistics:TREASURER": null
+      }
+    },
+    {
+      "id": "eval-006",
+      "title": "Длинное финансирование становится доступнее",
+      "content": "Синтетическая учебная публикация: длинное финансирование становится доступнее. Условия и применимость к конкретной компании требуют проверки по договорам, географии и доступным признакам.",
+      "topics": [
+        "rates"
+      ],
+      "synthetic": true,
+      "split": "holdout",
+      "relevance": {
+        "demo-metal:CEO": null,
+        "demo-metal:CFO": null,
+        "demo-metal:TREASURER": null,
+        "demo-retail:CEO": null,
+        "demo-retail:CFO": null,
+        "demo-retail:TREASURER": null,
+        "demo-logistics:CEO": null,
+        "demo-logistics:CFO": null,
+        "demo-logistics:TREASURER": null
+      }
+    },
+    {
+      "id": "eval-013",
+      "title": "Расчеты в национальных валютах обсуждаются рынком",
+      "content": "Синтетическая учебная публикация: расчеты в национальных валютах обсуждаются рынком. Условия и применимость к конкретной компании требуют проверки по договорам, географии и доступным признакам.",
+      "topics": [
+        "fx"
+      ],
+      "synthetic": true,
+      "split": "holdout",
+      "relevance": {
+        "demo-metal:CEO": null,
+        "demo-metal:CFO": null,
+        "demo-metal:TREASURER": null,
+        "demo-retail:CEO": null,
+        "demo-retail:CFO": null,
+        "demo-retail:TREASURER": null,
+        "demo-logistics:CEO": null,
+        "demo-logistics:CFO": null,
+        "demo-logistics:TREASURER": null
+      }
+    },
+    {
+      "id": "eval-020",
+      "title": "Цены на промышленное сырье изменились",
+      "content": "Синтетическая учебная публикация: цены на промышленное сырье изменились. Условия и применимость к конкретной компании требуют проверки по договорам, географии и доступным признакам.",
+      "topics": [
+        "commodities"
+      ],
+      "synthetic": true,
+      "split": "holdout",
+      "relevance": {
+        "demo-metal:CEO": null,
+        "demo-metal:CFO": null,
+        "demo-metal:TREASURER": null,
+        "demo-retail:CEO": null,
+        "demo-retail:CFO": null,
+        "demo-retail:TREASURER": null,
+        "demo-logistics:CEO": null,
+        "demo-logistics:CFO": null,
+        "demo-logistics:TREASURER": null
+      }
+    },
+    {
+      "id": "eval-027",
+      "title": "Розничные продажи изменили динамику",
+      "content": "Синтетическая учебная публикация: розничные продажи изменили динамику. Условия и применимость к конкретной компании требуют проверки по договорам, географии и доступным признакам.",
+      "topics": [
+        "demand"
+      ],
+      "synthetic": true,
+      "split": "holdout",
+      "relevance": {
+        "demo-metal:CEO": null,
+        "demo-metal:CFO": null,
+        "demo-metal:TREASURER": null,
+        "demo-retail:CEO": null,
+        "demo-retail:CFO": null,
+        "demo-retail:TREASURER": null,
+        "demo-logistics:CEO": null,
+        "demo-logistics:CFO": null,
+        "demo-logistics:TREASURER": null
+      }
+    },
+    {
+      "id": "eval-034",
+      "title": "Уточнены требования к договорам",
+      "content": "Синтетическая учебная публикация: уточнены требования к договорам. Условия и применимость к конкретной компании требуют проверки по договорам, географии и доступным признакам.",
+      "topics": [
+        "regulation"
+      ],
+      "synthetic": true,
+      "split": "holdout",
+      "relevance": {
+        "demo-metal:CEO": null,
+        "demo-metal:CFO": null,
+        "demo-metal:TREASURER": null,
+        "demo-retail:CEO": null,
+        "demo-retail:CFO": null,
+        "demo-retail:TREASURER": null,
+        "demo-logistics:CEO": null,
+        "demo-logistics:CFO": null,
+        "demo-logistics:TREASURER": null
+      }
+    },
+    {
+      "id": "eval-041",
+      "title": "Обучение работников получает поддержку",
+      "content": "Синтетическая учебная публикация: обучение работников получает поддержку. Условия и применимость к конкретной компании требуют проверки по договорам, географии и доступным признакам.",
+      "topics": [
+        "labor"
+      ],
+      "synthetic": true,
+      "split": "holdout",
+      "relevance": {
+        "demo-metal:CEO": null,
+        "demo-metal:CFO": null,
+        "demo-metal:TREASURER": null,
+        "demo-retail:CEO": null,
+        "demo-retail:CFO": null,
+        "demo-retail:TREASURER": null,
+        "demo-logistics:CEO": null,
+        "demo-logistics:CFO": null,
+        "demo-logistics:TREASURER": null
+      }
+    },
+    {
+      "id": "eval-048",
+      "title": "Факторинг получил новые условия",
+      "content": "Синтетическая учебная публикация: факторинг получил новые условия. Условия и применимость к конкретной компании требуют проверки по договорам, географии и доступным признакам.",
+      "topics": [
+        "liquidity"
+      ],
+      "synthetic": true,
+      "split": "holdout",
+      "relevance": {
+        "demo-metal:CEO": null,
+        "demo-metal:CFO": null,
+        "demo-metal:TREASURER": null,
+        "demo-retail:CEO": null,
+        "demo-retail:CFO": null,
+        "demo-retail:TREASURER": null,
+        "demo-logistics:CEO": null,
+        "demo-logistics:CFO": null,
+        "demo-logistics:TREASURER": null
+      }
+    }
+  ]
+}

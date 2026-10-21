@@ -1,0 +1,5 @@
+PAYER;BENEFICIARY;PAY_AMT;PAY_CNT
+sample-metal;sample-logistics;7500000;18
+sample-metal;sample-retail;2500000;7
+sample-retail;sample-logistics;4000000;12
+sample-logistics;sample-metal;1200000;3
