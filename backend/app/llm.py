@@ -9,7 +9,9 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from .config import APPROVED_MODELS, settings
 from .db import SessionLocal
-from .models import Budget, Usage
+from .models import Budget, LlmAllowance, Usage
+
+ALLOWANCE_KEY = "initial-trial"
 
 
 class ModelUnavailable(RuntimeError):
@@ -20,12 +22,36 @@ class BudgetExceeded(ModelUnavailable):
     pass
 
 
-def reserve_budget(amount):
+def allowance_status(db):
+    cfg = settings()
+    allowance = db.get(LlmAllowance, ALLOWANCE_KEY)
+    used = allowance.requests if allowance else 0
+    limit = min(cfg.llm_request_limit, 20)
+    return {"request_limit": limit, "requests_used": used, "requests_remaining": max(limit - used, 0),
+            "spent_rub": round(allowance.spent, 6) if allowance else 0,
+            "test_limit_rub": cfg.llm_test_limit_rub}
+
+
+def reserve_budget(amount, *, count_request=False):
+    if not math.isfinite(amount) or amount < 0:
+        raise BudgetExceeded("Не удалось определить верхнюю оценку стоимости запроса")
     cfg = settings()
     day = datetime.now(ZoneInfo(cfg.llm_budget_timezone)).date().isoformat()
     limit = min(max(cfg.llm_daily_limit_rub, 0), 500)
     with SessionLocal() as db:
         insert = pg_insert if db.bind.dialect.name == "postgresql" else sqlite_insert
+        if count_request:
+            if cfg.llm_test_limit_rub <= 0:
+                raise BudgetExceeded("Укажите общий денежный лимит теста LLM_TEST_LIMIT_RUB. Вызов не выполнен.")
+            db.execute(insert(LlmAllowance).values(key=ALLOWANCE_KEY, requests=0, spent=0)
+                       .on_conflict_do_nothing(index_elements=["key"]))
+            reserved = db.execute(update(LlmAllowance).where(LlmAllowance.key == ALLOWANCE_KEY,
+                LlmAllowance.requests < min(cfg.llm_request_limit, 20),
+                LlmAllowance.spent + amount <= cfg.llm_test_limit_rub)
+                .values(requests=LlmAllowance.requests + 1, spent=LlmAllowance.spent + amount))
+            if reserved.rowcount != 1:
+                db.rollback()
+                raise BudgetExceeded("Общий лимит запросов или денежный лимит теста исчерпан. Новые вызовы остановлены.")
         db.execute(insert(Budget).values(day=day, spent=0).on_conflict_do_nothing(index_elements=["day"]))
         updated = db.execute(update(Budget).where(Budget.day == day, Budget.spent + amount <= limit)
                              .values(spent=Budget.spent + amount))
@@ -52,7 +78,8 @@ def complete_json(system, payload, *, run_id=None, extraction=False, max_tokens=
     # UTF-8 byte count is a conservative input token ceiling for BPE models.
     input_ceiling = len((system + content).encode("utf-8")) + 512
     reservation = (input_ceiling * cfg.llm_input_rub_per_million + max_tokens * cfg.llm_output_rub_per_million) / 1_000_000
-    day = reserve_budget(reservation)
+    # Reserve an attempt before sending; timeouts and process crashes never return this slot.
+    day = reserve_budget(reservation, count_request=True)
     usage = None
     try:
         response = httpx.post(cfg.llm_base_url.rstrip("/") + "/chat/completions",
@@ -81,6 +108,9 @@ def complete_json(system, payload, *, run_id=None, extraction=False, max_tokens=
         if valid_usage:
             actual = (usage["prompt_tokens"] * cfg.llm_input_rub_per_million + usage["completion_tokens"] * cfg.llm_output_rub_per_million) / 1_000_000
         with SessionLocal() as db:
+            # Keep the same row-lock order as reservation under concurrent workers.
+            db.execute(update(LlmAllowance).where(LlmAllowance.key == ALLOWANCE_KEY)
+                       .values(spent=LlmAllowance.spent + actual - reservation))
             db.execute(update(Budget).where(Budget.day == day).values(spent=Budget.spent + actual - reservation))
             db.add(Usage(run_id=run_id, model=model, input_tokens=usage["prompt_tokens"] if valid_usage else 0,
                          output_tokens=usage["completion_tokens"] if valid_usage else 0,

@@ -21,6 +21,7 @@ from .schemas import Analyze, FeedbackInput, Login, NewsInput, Question, Role
 from .seed import seed
 from .worker import work_loop
 from .feeds import feed_status, refresh_feed
+from .llm import allowance_status
 
 
 @asynccontextmanager
@@ -296,7 +297,7 @@ def metrics(user: User = Depends(admin), db: Session = Depends(get_db)):
     feedback_counts = dict(db.execute(select(Feedback.category, func.count()).group_by(Feedback.category)).all())
     runs = db.scalars(select(Run).where(Run.status == "completed")).all()
     durations = [(r.finished_at-r.created_at).total_seconds() for r in runs if r.finished_at]
-    return {"runs": statuses, "feedback": feedback_counts,
+    return {"runs": statuses, "feedback": feedback_counts, "llm_allowance": allowance_status(db),
         "budgets": [{"day": b.day, "spent_rub": round(b.spent, 4)} for b in db.scalars(select(Budget).order_by(Budget.day.desc()).limit(7))],
         "latency_avg_seconds": round(sum(durations)/len(durations), 2) if durations else None,
         "insufficient_count": sum(r.result.get("verification") == "insufficient" for r in runs if r.result),

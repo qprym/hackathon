@@ -121,6 +121,13 @@ class Usage(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
+class LlmAllowance(Base):
+    __tablename__ = "llm_allowance"
+    key: Mapped[str] = mapped_column(String(40), primary_key=True)
+    requests: Mapped[int] = mapped_column(Integer, default=0)
+    spent: Mapped[float] = mapped_column(Float, default=0)
+
+
 class Feedback(Base):
     __tablename__ = "feedback"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
