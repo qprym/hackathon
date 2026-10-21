@@ -169,11 +169,13 @@ def create_run(db, user, body, question=None, parent=None):
     context_version = company_context(db, company, user.company_ids)
     access_scope = sorted(set(user.company_ids))
     key = hashlib.sha256(json.dumps([user.id, access_scope, body.model_dump(), company.features, str(company.updated_at),
-        [list(d) for d in documents], context_version, question, parent, settings().demo_mode,
-        settings().llm_analysis_id, settings().llm_extraction_id, "prompt-v7"], sort_keys=True, default=str).encode()).hexdigest()
+        [list(d) for d in documents], context_version, question, parent if question else None, settings().demo_mode,
+        settings().llm_analysis_id, settings().llm_extraction_id, "prompt-v11"], sort_keys=True, default=str).encode()).hexdigest()
     existing = db.scalar(select(Run).where(Run.cache_key == key, Run.status.in_(["queued", "running", "completed"])).order_by(Run.created_at.desc()))
-    if existing:
+    if existing and not (parent and not question and existing.status == 'completed' and (existing.result or {}).get('verification') == 'insufficient'):
         return {"run_id": existing.id, "cached": existing.status == "completed"}
+    if not settings().demo_mode and (question or not parent) and allowance_status(db)['requests_remaining'] < 5:
+        raise HTTPException(429, 'Для нового разбора или вопроса нужны как минимум пять обращений. Оставшаяся квота сохранена; готовые результаты доступны из кеша.')
     pending = db.scalar(select(func.count()).select_from(Run).where(Run.user_id == user.id, Run.status.in_(["queued", "running"])))
     if pending >= 5:
         raise HTTPException(429, "Дождитесь завершения текущих анализов")
@@ -226,6 +228,16 @@ def feedback(run_id: str, body: FeedbackInput, user: User = Depends(current_user
     record.category, record.comment = body.category, body.comment
     db.commit()
     return {"ok": True}
+
+
+@app.post('/api/insights/{run_id}/retry', status_code=202)
+def retry_insight(run_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    run = authorized_run(db, user, run_id)
+    if run.status != 'completed' or (run.result or {}).get('verification') != 'insufficient':
+        raise HTTPException(409, 'Повторная проверка доступна для отклонённого разбора')
+    if not settings().demo_mode and allowance_status(db)['requests_remaining'] < 4:
+        raise HTTPException(429, 'Для исправления с корректирующим циклом нужны четыре оставшихся обращения. Общий лимит не увеличен.')
+    return create_run(db, user, Analyze(company_id=run.company_id, event_id=run.event_id, role=run.role), parent=run.id)
 
 
 @app.get("/api/sources/{source_id}")

@@ -7,6 +7,7 @@ APPROVED_MODELS = {
     "Gemma 4 26B A4B", "GLM-5.3-Flash", "Qwen3.6 35B A3B",
     "DeepSeek-V4.1-Flash", "Qwen3-VL-30B-A3B-Instruct", "Kimi-K2.6",
 }
+MAX_TRIAL_REQUESTS = 40
 
 
 class Settings(BaseSettings):
@@ -30,7 +31,7 @@ class Settings(BaseSettings):
     llm_input_rub_per_million: float = 0
     llm_output_rub_per_million: float = 0
     llm_daily_limit_rub: float = 450
-    llm_request_limit: int = Field(default=20, ge=0, le=20)
+    llm_request_limit: int = Field(default=20, ge=0, le=MAX_TRIAL_REQUESTS)
     llm_test_limit_rub: float = Field(default=0, ge=0, le=500, allow_inf_nan=False)
     llm_budget_timezone: str = "Europe/Moscow"
 

@@ -3,11 +3,12 @@ import json
 import math
 from datetime import datetime
 from zoneinfo import ZoneInfo
+from urllib.parse import urlsplit
 import httpx
 from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-from .config import APPROVED_MODELS, settings
+from .config import APPROVED_MODELS, MAX_TRIAL_REQUESTS, settings
 from .db import SessionLocal
 from .models import Budget, LlmAllowance, Usage
 
@@ -22,11 +23,15 @@ class BudgetExceeded(ModelUnavailable):
     pass
 
 
+class OutputTruncated(ValueError):
+    pass
+
+
 def allowance_status(db):
     cfg = settings()
     allowance = db.get(LlmAllowance, ALLOWANCE_KEY)
     used = allowance.requests if allowance else 0
-    limit = min(cfg.llm_request_limit, 20)
+    limit = min(cfg.llm_request_limit, MAX_TRIAL_REQUESTS)
     return {"request_limit": limit, "requests_used": used, "requests_remaining": max(limit - used, 0),
             "spent_rub": round(allowance.spent, 6) if allowance else 0,
             "test_limit_rub": cfg.llm_test_limit_rub}
@@ -46,7 +51,7 @@ def reserve_budget(amount, *, count_request=False):
             db.execute(insert(LlmAllowance).values(key=ALLOWANCE_KEY, requests=0, spent=0)
                        .on_conflict_do_nothing(index_elements=["key"]))
             reserved = db.execute(update(LlmAllowance).where(LlmAllowance.key == ALLOWANCE_KEY,
-                LlmAllowance.requests < min(cfg.llm_request_limit, 20),
+                LlmAllowance.requests < min(cfg.llm_request_limit, MAX_TRIAL_REQUESTS),
                 LlmAllowance.spent + amount <= cfg.llm_test_limit_rub)
                 .values(requests=LlmAllowance.requests + 1, spent=LlmAllowance.spent + amount))
             if reserved.rowcount != 1:
@@ -62,7 +67,7 @@ def reserve_budget(amount, *, count_request=False):
     return day
 
 
-def complete_json(system, payload, *, run_id=None, extraction=False, max_tokens=2400):
+def complete_json(system, payload, *, run_id=None, extraction=False, max_tokens=2400, reasoning=False):
     cfg = settings()
     if cfg.demo_mode:
         raise ModelUnavailable("LLM отключена в демонстрационном режиме")
@@ -75,6 +80,17 @@ def complete_json(system, payload, *, run_id=None, extraction=False, max_tokens=
     if cfg.llm_input_rub_per_million <= 0 or cfg.llm_output_rub_per_million <= 0:
         raise ModelUnavailable("Для контроля бюджета укажите подтвержденные тарифы провайдера")
     content = json.dumps(payload, ensure_ascii=False, default=str)
+    request_body = {"model": model_id, "messages": [{"role": "system", "content": system},
+        {"role": "user", "content": content}],
+        "temperature": .1, "max_tokens": max_tokens, "response_format": {"type": "json_object"}}
+    if urlsplit(cfg.llm_base_url).hostname == 'api.deepseek.com':
+        if model != 'DeepSeek-V4.1-Flash' or model_id != 'deepseek-flash':
+            raise ModelUnavailable('Для прямого API DeepSeek разрешён только deepseek-flash (DeepSeek-V4.1-Flash)')
+        # Spend reasoning tokens only on synthesis and verification, within the same output cap.
+        request_body['thinking'] = {'type': 'enabled' if reasoning else 'disabled'}
+        if reasoning:
+            request_body['reasoning_effort'] = 'high'
+            request_body.pop('temperature', None)
     # UTF-8 byte count is a conservative input token ceiling for BPE models.
     input_ceiling = len((system + content).encode("utf-8")) + 512
     reservation = (input_ceiling * cfg.llm_input_rub_per_million + max_tokens * cfg.llm_output_rub_per_million) / 1_000_000
@@ -84,12 +100,12 @@ def complete_json(system, payload, *, run_id=None, extraction=False, max_tokens=
     try:
         response = httpx.post(cfg.llm_base_url.rstrip("/") + "/chat/completions",
             headers={"Authorization": f"Bearer {cfg.llm_api_key}"}, timeout=75,
-            json={"model": model_id, "messages": [{"role": "system", "content": system},
-                  {"role": "user", "content": content}], "temperature": .1,
-                  "max_tokens": max_tokens, "response_format": {"type": "json_object"}})
+            json=request_body)
         response.raise_for_status()
         body = response.json()
         usage = body.get("usage")
+        if body['choices'][0].get('finish_reason') == 'length':
+            raise OutputTruncated('Ответ обрезан лимитом токенов')
         answer = body["choices"][0]["message"]["content"]
         if not isinstance(answer, str):
             raise ValueError("Ответ модели не является текстом JSON")
@@ -102,6 +118,14 @@ def complete_json(system, payload, *, run_id=None, extraction=False, max_tokens=
         status = "error"
         result = None
         error = ModelUnavailable("Провайдер LLM недоступен или вернул некорректный JSON. Проверьте конфигурацию и журнал расходов.")
+        if isinstance(exc, OutputTruncated):
+            error = ModelUnavailable('Ответ модели обрезан лимитом выходных токенов. Сократите требуемый ответ; автоматического повтора нет.')
+        if isinstance(exc, httpx.HTTPStatusError):
+            messages = {401: 'DeepSeek/API отклонил ключ (HTTP 401). Проверьте ключ в локальном .env.',
+                402: 'На счёте провайдера недостаточно средств (HTTP 402). Повторный запрос не выполнялся.',
+                429: 'Провайдер ограничил частоту запросов (HTTP 429). Автоматического повтора нет.'}
+            error = ModelUnavailable(messages.get(exc.response.status_code,
+                f'Провайдер LLM вернул HTTP {exc.response.status_code}. Автоматического повтора нет.'))
     finally:
         valid_usage = isinstance(usage, dict) and all(isinstance(usage.get(k), int) and usage[k] >= 0 for k in ("prompt_tokens", "completion_tokens"))
         actual = reservation

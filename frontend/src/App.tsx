@@ -789,10 +789,12 @@ function Analysis({
   runId,
   onBack,
   onSource,
+  onRetry,
 }: {
   runId: string;
   onBack: () => void;
   onSource: (id: string) => void;
+  onRetry: (id: string) => void;
 }) {
   const [run, setRun] = useState<Run | null>(null),
     [error, setError] = useState(""),
@@ -879,6 +881,15 @@ function Analysis({
       setError((e as Error).message);
     }
   }
+  async function retry() {
+    setError("");
+    setAsking(true);
+    try {
+      const result = await post<{ run_id: string }>("/insights/" + runId + "/retry", {});
+      onRetry(result.run_id);
+    } catch (e) { setError((e as Error).message); }
+    finally { setAsking(false); }
+  }
   const insight = run?.result;
   return (
     <div className="analysis-page">
@@ -886,6 +897,10 @@ function Analysis({
         <ArrowLeft size={17} /> К событиям
       </button>
       {error && <ErrorBox error={error} />}
+      {insight?.verification === "insufficient" && <div className="panel">
+        <p>Повторная проверка заново загрузит контекст и источники. В режиме LLM она использует до четырёх обращений: исправление и проверку, при необходимости ещё один цикл.</p>
+        <button className="secondary-button" onClick={() => void retry()} disabled={asking}>Исправить и проверить разбор</button>
+      </div>}
       <div className="analysis-heading">
         <span className="eyebrow">ПЕРСОНАЛЬНЫЙ РАЗБОР</span>
         <h1>{insight?.headline || "Собираем контекст события"}</h1>
@@ -903,7 +918,7 @@ function Analysis({
               <ShieldCheck size={13} />
               {insight.verification === "checked"
                 ? insight.mode === "demo" ? "Ссылки проверены · демо" : "Основания проверены"
-                : "Ограниченные основания"}
+                : insight.verification === "insufficient" ? "Проверка не пройдена" : "Ограниченные основания"}
             </span>
           </div>
         )}
@@ -992,8 +1007,9 @@ function Analysis({
                     />
                   ) : (
                     <p className="muted">
-                      Подходящий материал банка не найден. Мнение банка не
-                      достраивается.
+                      {insight.evidence.some((e) => e.kind === "bank")
+                        ? "Материалы банка найдены, но подтверждённый вывод по ним не сформирован. Фрагменты доступны в источниках."
+                        : "Подходящий материал банка не найден. Мнение банка не достраивается."}
                     </p>
                   )}
                 </section>
@@ -1214,7 +1230,8 @@ function MetricsPanel() {
           <h3>Бюджет моделей</h3>
           <div className="context-line"><span>Обращения за весь тест</span><strong>{metrics.llm_allowance.requests_used} / {metrics.llm_allowance.request_limit}</strong></div>
           <div className="context-line"><span>Общий денежный потолок</span><strong>{metrics.llm_allowance.test_limit_rub} ₽</strong></div>
-          <div className="context-line"><span>Расход теста</span><strong>{metrics.llm_allowance.spent_rub.toFixed(3)} ₽</strong></div>
+          <div className="context-line"><span>Учтено по тарифам</span><strong>{metrics.llm_allowance.spent_rub.toFixed(3)} ₽</strong></div>
+          <p className="form-note">Оценка по настроенным тарифам включает резерв незавершённых запросов. Фактические списания сверяйте в кабинете провайдера; скидки и кеш могут уменьшать стоимость.</p>
           {!metrics.llm_allowance.test_limit_rub && <p className="form-note">Платные обращения заблокированы до задания денежного лимита.</p>}
           {metrics.budgets.length ? (
             metrics.budgets.map((b) => (
@@ -1569,6 +1586,7 @@ export default function App() {
                 runId={runId}
                 onBack={() => setRunId(null)}
                 onSource={(id) => void openSource(id)}
+                onRetry={setRunId}
               />
             ) : (
               <>

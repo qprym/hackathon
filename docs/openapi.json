@@ -1,7 +1,7 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "Альфа · Контекст",
+    "title": "\u0410\u043b\u044c\u0444\u0430 \u00b7 \u041a\u043e\u043d\u0442\u0435\u043a\u0441\u0442",
     "version": "0.1.0"
   },
   "paths": {
@@ -397,6 +397,43 @@
         },
         "responses": {
           "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/insights/{run_id}/retry": {
+      "post": {
+        "summary": "Retry Insight",
+        "operationId": "retry_insight_api_insights__run_id__retry_post",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
             "description": "Successful Response",
             "content": {
               "application/json": {

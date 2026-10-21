@@ -30,6 +30,8 @@ def company_context(db, company, allowed_company_ids=None):
     payments = db.scalars(select(Link).where(
         Link.kind == "payment", or_(Link.source_id == company.id, Link.target_id == company.id)
     )).all()
+    self_payments = [p for p in payments if p.source_id == p.target_id]
+    payments = [p for p in payments if p.source_id != p.target_id]
     outgoing = [p for p in payments if p.source_id == company.id]
     incoming = [p for p in payments if p.target_id == company.id]
     total = sum(p.amount or 0 for p in outgoing)
@@ -79,6 +81,8 @@ def company_context(db, company, allowed_company_ids=None):
             "products": [label for key, label in PRODUCTS.items() if value(company, key) is True],
             "group": group, "counterparties": related, "shared_person_links": shared_person_links,
             "missing": missing + ["Рыночная доля: нет данных об объеме рынка", "Суммы, ставки и сроки кредитов", "Направление внешней торговли и валюты контрактов", "Единицы выручки и сумм платежей из CSV не подтверждены"],
-            "payment_summary": {"incoming": sum(p.amount or 0 for p in incoming), "outgoing": total},
+            "payment_summary": {"incoming": sum(p.amount or 0 for p in incoming), "outgoing": total,
+                "self_payments": sum(p.amount or 0 for p in self_payments)},
             "limitations": ["Платежи описывают только предоставленный набор; период и полнота требуют проверки.",
+                            "Платежи компании самой себе исключены из числа контрагентов и концентрации внешних платежей.",
                             "Город регистрации не доказывает географию всех операций."]}

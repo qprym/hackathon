@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Literal
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 
 Role = Literal["CEO", "CFO", "TREASURER"]
 
@@ -31,6 +31,7 @@ class NewsInput(BaseModel):
 
 
 class Claim(BaseModel):
+    model_config = ConfigDict(extra='forbid')
     text: str = Field(min_length=3, max_length=1800)
     evidence_ids: list[str] = Field(default_factory=list, max_length=12)
     feature_keys: list[str] = Field(default_factory=list, max_length=12)
@@ -38,6 +39,7 @@ class Claim(BaseModel):
 
 
 class Insight(BaseModel):
+    model_config = ConfigDict(extra='forbid')
     headline: str = Field(max_length=300)
     facts: list[Claim] = Field(default_factory=list, max_length=8)
     bank_view: list[Claim] = Field(default_factory=list, max_length=6)
@@ -47,6 +49,12 @@ class Insight(BaseModel):
     actions: list[Claim] = Field(default_factory=list, max_length=6)
     answer: list[Claim] = Field(default_factory=list, max_length=8)
     limitations: list[str] = Field(default_factory=list, max_length=15)
+
+
+class Review(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    issues: list[str] = Field(max_length=6)
+    search_queries: list[str] = Field(default_factory=list, max_length=2)
 
 
 class FeedbackInput(BaseModel):
