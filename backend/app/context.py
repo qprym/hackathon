@@ -16,7 +16,8 @@ def value(company, key, default=None):
     return company.features.get(key, {}).get("value", default)
 
 
-def company_context(db, company):
+def company_context(db, company, allowed_company_ids=None):
+    allowed = set(allowed_company_ids) if allowed_company_ids is not None else None
     features = dict(company.features)
     payments = db.scalars(select(Link).where(
         Link.kind == "payment", or_(Link.source_id == company.id, Link.target_id == company.id)
@@ -31,23 +32,36 @@ def company_context(db, company):
     features["counterparty_count"] = feature(len({p.target_id if p.source_id == company.id else p.source_id for p in payments}),
         "Платежные связи в предоставленной выборке", "calculated", "Контрагенты в выборке")
     related = []
+    aliases = {}
     for p in sorted(payments, key=lambda p: p.amount or 0, reverse=True)[:10]:
         other_id = p.target_id if p.source_id == company.id else p.source_id
-        other = db.get(Company, other_id)
-        related.append({"id": other_id, "industry": other.industry if other else "Неизвестна",
+        permitted = allowed is None or other_id in allowed
+        other = db.get(Company, other_id) if permitted else None
+        if other and other.synthetic != company.synthetic:
+            other = None
+        alias = aliases.setdefault(other_id, f"Контрагент {len(aliases) + 1}")
+        related.append({"id": other_id if permitted else alias,
+                        "industry": other.industry if other else "Неизвестна",
                         "region": other.region if other else "Неизвестен",
+                        "profile_available": other is not None,
                         "direction": "outgoing" if p.source_id == company.id else "incoming",
                         "amount": p.amount, "count": p.count})
     group = []
     if company.group_id:
+        stmt = select(Company).where(Company.group_id == company.group_id, Company.synthetic == company.synthetic)
+        if allowed is not None:
+            stmt = stmt.where(Company.id.in_(allowed))
         group = [{"id": c.id, "industry": c.industry} for c in db.scalars(
-            select(Company).where(Company.group_id == company.group_id)).all()]
+            stmt).all()]
     persons = db.scalars(select(Link).where(Link.kind == "person", Link.target_id == company.id)).all()
     shared_person_links = []
     if persons:
+        stmt = select(Link).where(Link.kind == "person",
+            Link.source_id.in_([p.source_id for p in persons]), Link.target_id != company.id)
+        if allowed is not None:
+            stmt = stmt.where(Link.target_id.in_(allowed))
         shared_person_links = [{"company_id": l.target_id, "relation": "Общее обезличенное физическое лицо; тип связи неизвестен"}
-            for l in db.scalars(select(Link).where(Link.kind == "person",
-                Link.source_id.in_([p.source_id for p in persons]), Link.target_id != company.id)).all()]
+            for l in db.scalars(stmt).all()]
     missing = [label for key, label in [("REVENUE_COMPANY", "Выручка"), ("MAINOKVED_CODE", "ОКВЭД"), ("FTS_COUNTRY_NAME", "Страны из данных ФТС")]
                if value(company, key) is None]
     return {"id": company.id, "name": company.name, "industry": company.industry,

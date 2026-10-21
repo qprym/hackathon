@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from .auth import admin, authorize_company, current_user, make_session, token_hash, verify_password
 from .config import settings
 from .context import company_context
-from .db import Base, SessionLocal, engine, get_db, utcnow
+from .db import SessionLocal, engine, get_db, initialize_development_schema, utcnow
 from .ingestion import FEEDS, extract_pdf, import_csv, import_document, import_feed
 from .models import Audit, AuthSession, Budget, Company, Document, Event, Feedback, Link, Run, Usage, User
 from .retrieval import TOPIC_NAMES, rank_event
@@ -25,7 +25,7 @@ from .worker import work_loop
 async def lifespan(app):
     # Production PostgreSQL schema is owned by Alembic; SQLite is a development convenience.
     if engine.dialect.name == "sqlite":
-        Base.metadata.create_all(engine)
+        initialize_development_schema()
     if settings().seed_demo:
         with SessionLocal() as db:
             seed(db)
@@ -119,19 +119,13 @@ def companies(user: User = Depends(current_user), db: Session = Depends(get_db))
 @app.get("/api/companies/{company_id}/context")
 def context(company_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
     company = authorize_company(db, user, company_id)
-    result = company_context(db, company)
-    # Raw financial relationship data belonging to inaccessible companies stays server-side.
-    allowed = set(user.company_ids)
-    result["group"] = [g for g in result["group"] if g["id"] in allowed]
-    result["counterparties"] = [{**c, "id": c["id"] if c["id"] in allowed else "Связанный контрагент"} for c in result["counterparties"]]
-    result["shared_person_links"] = [l for l in result["shared_person_links"] if l["company_id"] in allowed]
-    return result
+    return company_context(db, company, user.company_ids)
 
 
 @app.get("/api/feed")
 def feed(company_id: str, role: Role = "CFO", topic: str | None = None, user: User = Depends(current_user), db: Session = Depends(get_db)):
     company = authorize_company(db, user, company_id)
-    ctx = company_context(db, company)
+    ctx = company_context(db, company, user.company_ids)
     events = db.scalars(select(Event).where(Event.synthetic == company.synthetic).order_by(Event.published_at.desc()).limit(500)).all()
     entries = []
     for event in events:
@@ -158,9 +152,10 @@ def create_run(db, user, body, question=None, parent=None):
     documents = db.execute(select(Document.id, Document.content_hash).where(Document.synthetic == event.synthetic)
                            .order_by(Document.id)).all()
     links = db.execute(select(Link.id, Link.amount, Link.count).order_by(Link.id)).all()
-    key = hashlib.sha256(json.dumps([user.id, body.model_dump(), company.features, str(company.updated_at),
+    access_scope = sorted(set(user.company_ids))
+    key = hashlib.sha256(json.dumps([user.id, access_scope, body.model_dump(), company.features, str(company.updated_at),
         [list(d) for d in documents], [list(l) for l in links], question, parent, settings().demo_mode,
-        settings().llm_analysis_id, "prompt-v2"], sort_keys=True, default=str).encode()).hexdigest()
+        settings().llm_analysis_id, settings().llm_extraction_id, "prompt-v3"], sort_keys=True, default=str).encode()).hexdigest()
     existing = db.scalar(select(Run).where(Run.cache_key == key, Run.status.in_(["queued", "running", "completed"])).order_by(Run.created_at.desc()))
     if existing:
         return {"run_id": existing.id, "cached": existing.status == "completed"}
@@ -168,7 +163,7 @@ def create_run(db, user, body, question=None, parent=None):
     if pending >= 5:
         raise HTTPException(429, "Дождитесь завершения текущих анализов")
     run = Run(user_id=user.id, company_id=company.id, event_id=event.id, role=body.role,
-              question=question, parent_id=parent, cache_key=key)
+              question=question, parent_id=parent, cache_key=key, access_scope=access_scope)
     db.add(run)
     db.commit()
     return {"run_id": run.id, "cached": False}
@@ -183,6 +178,8 @@ def authorized_run(db, user, run_id):
     run = db.get(Run, run_id)
     if not run or run.user_id != user.id or run.company_id not in user.company_ids:
         raise HTTPException(404, "Анализ не найден")
+    if not run.access_scope or not set(run.access_scope).issubset(user.company_ids):
+        raise HTTPException(409, "Права доступа изменились. Запустите новый анализ из ленты.")
     return run
 
 

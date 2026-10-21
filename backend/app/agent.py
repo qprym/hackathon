@@ -1,12 +1,13 @@
 import json
 import re
 from datetime import datetime, timedelta
+from decimal import Decimal
 from pydantic import ValidationError
 from .config import settings
 from .context import company_context
 from .db import utcnow
 from .llm import complete_json
-from .models import Company, Event, Run
+from .models import Company, Event, Run, User
 from .retrieval import TOPICS, TOPIC_NAMES, event_evidence, rank_event, search_documents
 from .schemas import Claim, Insight
 
@@ -74,6 +75,13 @@ def demo_insight(event, context, role, evidence, question=None):
         answer=answer, limitations=limitations)
 
 
+def numeric_values(text):
+    # Compare full numeric values, never substrings (10 is not confirmed by 100).
+    matches = re.findall(r"(?<!\w)[+−-]?\d+(?:[ \u00a0\u202f]\d{3})*(?:[.,]\d+)?", text)
+    return {Decimal(re.sub(r"[ \u00a0\u202f]", "", value).replace(",", ".").replace("−", "-"))
+            for value in matches}
+
+
 def validate_insight(insight, evidence, context):
     known = {e["id"]: e for e in evidence}
     issues = []
@@ -89,8 +97,7 @@ def validate_insight(insight, evidence, context):
                 issues.append("Позиция банка должна опираться только на банковские материалы")
             if section in ("facts", "bank_view") and not claim.assumption:
                 source_text = " ".join(known.get(ref, {}).get("excerpt", "") for ref in claim.evidence_ids)
-                numbers = re.findall(r"\d+(?:[.,]\d+)?", claim.text)
-                if any(n not in source_text for n in numbers):
+                if not numeric_values(claim.text).issubset(numeric_values(source_text)):
                     issues.append(f"{section}: число отсутствует в цитируемом фрагменте")
     if not insight.impact:
         issues.append("Нет интерпретации влияния на компанию")
@@ -99,7 +106,10 @@ def validate_insight(insight, evidence, context):
 
 def run_agent(db, run):
     company, event = db.get(Company, run.company_id), db.get(Event, run.event_id)
-    context = company_context(db, company)
+    user = db.get(User, run.user_id)
+    if not user or not run.access_scope or run.company_id not in user.company_ids or not set(run.access_scope).issubset(user.company_ids):
+        raise PermissionError("Company permissions changed before the analysis started")
+    context = company_context(db, company, run.access_scope)
     trace(db, run, "Контекст компании", {"company_id": company.id, "role": run.role,
         "feature_keys": list(context["features"]), "missing": context["missing"]})
     previous = None

@@ -2,6 +2,7 @@ import csv
 import hashlib
 import io
 import ipaddress
+import json
 import re
 import socket
 from datetime import UTC, datetime, timedelta
@@ -47,10 +48,18 @@ def import_document(db, *, title, content, kind, publisher, published_at, url=No
     text = clean_text(content)
     if len(text) < 60:
         raise ValueError("Недостаточно текста для анализа: минимум 60 символов")
-    content_hash = digest(f"{kind}|{synthetic}|{text}")
+    title, publisher = title.strip(), publisher.strip()
+    # Deduplicate the same publication while retaining independent publishers and dates.
+    identity = [kind, synthetic, text, title, publisher, url or "", published_at.isoformat()]
+    content_hash = digest(json.dumps(identity, ensure_ascii=False))
     existing = db.scalar(select(Document).where(Document.content_hash == content_hash))
     if existing:
         return existing, False
+    legacy = db.scalar(select(Document).where(Document.content_hash == digest(f"{kind}|{synthetic}|{text}")))
+    if legacy and (legacy.title, legacy.publisher, legacy.url or "", legacy.published_at) == (title, publisher, url or "", published_at):
+        legacy.content_hash = content_hash
+        db.commit()
+        return legacy, False
     doc = Document(title=title, content=text, kind=kind, publisher=publisher, url=url,
                    published_at=published_at, content_hash=content_hash, topics=classify(title + " " + text),
                    synthetic=synthetic, chunks=chunks or chunks_for(text))

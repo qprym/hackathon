@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, JSON, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column
 from .db import Base, utcnow
 
@@ -64,6 +64,10 @@ class Document(Base):
     chunks: Mapped[list] = mapped_column(JSON, default=list)
     synthetic: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    __table_args__ = (
+        Index("ix_documents_search", text("to_tsvector('russian'::regconfig, (title || ' '::text) || content)"),
+              postgresql_using="gin").ddl_if(dialect="postgresql"),
+    )
 
 
 class Event(Base):
@@ -83,6 +87,7 @@ class Run(Base):
     company_id: Mapped[str] = mapped_column(ForeignKey("companies.id"))
     event_id: Mapped[str] = mapped_column(ForeignKey("events.id"))
     role: Mapped[str] = mapped_column(String(20))
+    access_scope: Mapped[list] = mapped_column(JSON, default=list, server_default="[]")
     question: Mapped[str | None] = mapped_column(Text, nullable=True)
     parent_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     cache_key: Mapped[str] = mapped_column(String(64), index=True)

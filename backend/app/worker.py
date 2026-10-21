@@ -45,7 +45,9 @@ def process_one():
             db.rollback()
             run = db.get(Run, run.id)
             run.status, run.stage = "failed", "Анализ не завершен"
-            run.error = str(exc) if isinstance(exc, ModelUnavailable) else "Ошибка обработки. Проверьте журнал worker."
+            run.error = (str(exc) if isinstance(exc, ModelUnavailable) else
+                         "Права доступа изменились. Запустите новый анализ из ленты." if isinstance(exc, PermissionError) else
+                         "Ошибка обработки. Проверьте журнал worker.")
             run.finished_at, run.lease_until = utcnow(), None
             db.add(Audit(action="run_failed", actor="worker", details={"run_id": run.id, "error_type": type(exc).__name__}))
             db.commit()
