@@ -6,6 +6,13 @@ PRODUCTS = {
     "CL_PRODUCT_GAR_MARK": "Банковские гарантии", "CL_PRODUCT_LEA_MARK": "Лизинг",
     "FACTORING_MARK": "Факторинг", "CL_PRODUCT_RKO_MARK": "РКО", "CL_PRODUCT_ZPP_MARK": "Зарплатный проект",
 }
+FEATURE_LABELS = {**PRODUCTS, "SYNTHETIC_U": "Обезличенный ID", "ORG_TYPE": "Организационный тип",
+    "OKFS_NAME": "Форма собственности", "COMPANY_AGE_YEARS_GRADATION": "Возраст компании",
+    "ECO_MARK_LABEL": "Стадия жизненного цикла", "MAINOKVED_CODE": "ОКВЭД", "MAINOKVED_NAME": "Деятельность",
+    "NEGATIVEMARK": "Наличие ключевого собственника (описание кейса)",
+    "AMOUNT_WORKERS_FNS_GRADATION": "Численность по ФНС", "AMOUNT_WORKERS_SPARK_GRADATION": "Численность по СПАРК",
+    "CL_TYPE": "Клиентский статус", "FTS_FLAG": "Сведения ФТС", "FTS_COUNTRY_NAME": "Страны по ФТС",
+    "REVENUE_COMPANY": "Выручка", "GROUP_ID": "Группа", "CITY": "Город регистрации", "REGION": "Регион регистрации"}
 
 
 def feature(value, source, status="fact", label=None):
@@ -19,6 +26,7 @@ def value(company, key, default=None):
 def company_context(db, company, allowed_company_ids=None):
     allowed = set(allowed_company_ids) if allowed_company_ids is not None else None
     features = dict(company.features)
+    features = {key: {**item, 'label': FEATURE_LABELS.get(key, item.get('label', key))} for key, item in features.items()}
     payments = db.scalars(select(Link).where(
         Link.kind == "payment", or_(Link.source_id == company.id, Link.target_id == company.id)
     )).all()
@@ -51,7 +59,7 @@ def company_context(db, company, allowed_company_ids=None):
         stmt = select(Company).where(Company.group_id == company.group_id, Company.synthetic == company.synthetic)
         if allowed is not None:
             stmt = stmt.where(Company.id.in_(allowed))
-        group = [{"id": c.id, "industry": c.industry} for c in db.scalars(
+        group = [{"id": c.id, "industry": c.industry, "region": c.region} for c in db.scalars(
             stmt).all()]
     persons = db.scalars(select(Link).where(Link.kind == "person", Link.target_id == company.id)).all()
     shared_person_links = []
@@ -60,15 +68,17 @@ def company_context(db, company, allowed_company_ids=None):
             Link.source_id.in_([p.source_id for p in persons]), Link.target_id != company.id)
         if allowed is not None:
             stmt = stmt.where(Link.target_id.in_(allowed))
-        shared_person_links = [{"company_id": l.target_id, "relation": "Общее обезличенное физическое лицо; тип связи неизвестен"}
-            for l in db.scalars(stmt).all()]
+        shared_person_links = [{"company_id": company_id, "relation": "Общее обезличенное физическое лицо; тип связи неизвестен"}
+            for company_id in sorted({l.target_id for l in db.scalars(stmt).all()})]
+    if group:
+        features['accessible_group_size'] = feature(len(group), 'GROUP_ID; только доступные пользователю компании', 'calculated', 'Доступные участники группы')
     missing = [label for key, label in [("REVENUE_COMPANY", "Выручка"), ("MAINOKVED_CODE", "ОКВЭД"), ("FTS_COUNTRY_NAME", "Страны из данных ФТС")]
                if value(company, key) is None]
     return {"id": company.id, "name": company.name, "industry": company.industry,
             "region": company.region, "synthetic": company.synthetic, "features": features,
             "products": [label for key, label in PRODUCTS.items() if value(company, key) is True],
             "group": group, "counterparties": related, "shared_person_links": shared_person_links,
-            "missing": missing + ["Рыночная доля: нет данных об объеме рынка", "Суммы, ставки и сроки кредитов", "Направление внешней торговли и валюты контрактов"],
+            "missing": missing + ["Рыночная доля: нет данных об объеме рынка", "Суммы, ставки и сроки кредитов", "Направление внешней торговли и валюты контрактов", "Единицы выручки и сумм платежей из CSV не подтверждены"],
             "payment_summary": {"incoming": sum(p.amount or 0 for p in incoming), "outgoing": total},
             "limitations": ["Платежи описывают только предоставленный набор; период и полнота требуют проверки.",
                             "Город регистрации не доказывает географию всех операций."]}

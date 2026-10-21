@@ -42,6 +42,25 @@ def chunks_for(text, page=None):
             for i in range(0, len(text), 850) if text[i:i + 1000].strip()]
 
 
+def pdf_chunks(text, page):
+    """Keep paragraphs intact and retain exact offsets in the extracted page."""
+    result = []
+    for match in re.finditer(r'\S(?:.*?\S)?(?=\n\s*\n|$)', text, re.S):
+        paragraph = match.group()
+        start = 0
+        while start < len(paragraph):
+            end = min(start + 1400, len(paragraph))
+            if end < len(paragraph):
+                stops = list(re.finditer(r'[.!?]\s+', paragraph[start:end]))
+                if stops and stops[-1].end() > 500:
+                    end = start + stops[-1].end()
+            piece = paragraph[start:end].strip()
+            if len(piece) >= 60:
+                result.append({'text':piece,'page':page,'offset':match.start()+start})
+            start = end
+    return result
+
+
 def import_document(db, *, title, content, kind, publisher, published_at, url=None, synthetic=False, chunks=None, ingestion_meta=None):
     if published_at.tzinfo:
         published_at = published_at.astimezone(UTC).replace(tzinfo=None)
@@ -56,9 +75,11 @@ def import_document(db, *, title, content, kind, publisher, published_at, url=No
     content_hash = digest(json.dumps(identity, ensure_ascii=False))
     existing = db.scalar(select(Document).where(Document.content_hash == content_hash))
     if existing:
+        if chunks is not None:
+            existing.chunks = chunks
         if ingestion_meta:
             existing.ingestion_meta = ingestion_meta
-            db.commit()
+        db.commit()
         return existing, False
     legacy = db.scalar(select(Document).where(Document.content_hash == digest(f"{kind}|{synthetic}|{text}")))
     if legacy and (legacy.title, legacy.publisher, legacy.url or "", legacy.published_at) == (title, publisher, url or "", published_at):
@@ -132,78 +153,112 @@ def import_csv(db, raw, filename, synthetic=False):
     else:
         raise ValueError("Неизвестная схема CSV: ожидаются компании, платежи или связи физлиц")
     errors, imported, ids, seen = [], 0, [], set()
+    error_count = 0
+    known_companies = set(db.scalars(select(Company.id))) if kind != "companies" else set()
+    model = Company if kind == "companies" else Link
+    if db.bind.dialect.name == "postgresql":
+        from sqlalchemy.dialects.postgresql import insert
+    else:
+        from sqlalchemy.dialects.sqlite import insert
+    batch = []
+
+    def flush_batch():
+        if not batch:
+            return
+        stmt = insert(model).values(batch)
+        db.execute(stmt.on_conflict_do_update(index_elements=[model.id],
+            set_={key: getattr(stmt.excluded, key) for key in batch[0] if key != "id"}))
+        batch.clear()
+
     for line, row in enumerate(reader, 2):
-        row = {k.strip(): (v.strip() if v else None) for k, v in row.items() if k is not None}
         try:
-            with db.begin_nested():
-                if kind == "companies":
-                    company_id = row.get("SYNTHETIC_U")
-                    if not company_id or len(company_id) > 100:
-                        raise ValueError("Некорректный SYNTHETIC_U")
-                    if company_id in seen:
-                        raise ValueError("Повторяющийся SYNTHETIC_U внутри файла")
-                    seen.add(company_id)
-                    features = {}
-                    for key, val in row.items():
-                        if key in PRODUCTS or key == "FTS_FLAG":
-                            val = parse_bool(val)
-                        elif key == "REVENUE_COMPANY":
-                            val = parse_number(val)
-                            if val is not None and val < 0:
-                                raise ValueError("Отрицательная выручка")
-                        features[key] = feature(val, f"{filename}, строка {line}, {key}", label=PRODUCTS.get(key, key))
-                    company = db.get(Company, company_id) or Company(id=company_id)
-                    company.name = f"Компания {company_id}"
-                    company.industry = (row.get("MAINOKVED_NAME") or "Не указана")[:250]
-                    company.region = (row.get("REGION") or "Не указан")[:150]
-                    if row.get("GROUP_ID") and len(row["GROUP_ID"]) > 100:
-                        raise ValueError("Слишком длинный GROUP_ID")
-                    company.group_id = row.get("GROUP_ID")
-                    company.features = features
-                    company.synthetic = synthetic
-                    db.add(company)
-                    ids.append(company_id)
-                else:
-                    source = row.get("PAYER" if kind == "payments" else "SYNTHETIC_F")
-                    target = row.get("BENEFICIARY" if kind == "payments" else "SYNTHETIC_U")
-                    if not source or not target or max(len(source), len(target)) > 100:
-                        raise ValueError("Отсутствует или слишком длинный идентификатор связи")
-                    link_id = digest(f"{kind}:{source}:{target}")
-                    if link_id in seen:
-                        raise ValueError("Повторная пара идентификаторов: агрегируйте платежи до импорта")
-                    seen.add(link_id)
-                    amount = parse_number(row.get("PAY_AMT"))
-                    count = parse_number(row.get("PAY_CNT"))
-                    if amount is not None and amount < 0 or count is not None and (count < 0 or not count.is_integer()):
-                        raise ValueError("Некорректные PAY_AMT/PAY_CNT")
-                    link = db.get(Link, link_id) or Link(id=link_id)
-                    link.kind = "payment" if kind == "payments" else "person"
-                    link.source_id, link.target_id = source, target
-                    link.amount, link.count = amount, int(count) if count is not None else None
-                    link.details = {"source": filename, "line": line,
-                                    "unknown_target": db.get(Company, target) is None}
-                    db.add(link)
-                db.flush()
+            if None in row:
+                raise ValueError("Лишние значения: проверьте разделитель и кавычки")
+            row = {k.strip(): (v.strip() if v and v.strip().lower() not in ("nan", "none", "null") else None)
+                   for k, v in row.items()}
+            if kind == "companies":
+                company_id = row.get("SYNTHETIC_U")
+                if not company_id or len(company_id) > 100:
+                    raise ValueError("Некорректный SYNTHETIC_U")
+                if company_id in seen:
+                    raise ValueError("Повторяющийся SYNTHETIC_U внутри файла")
+                features = {}
+                for key, val in row.items():
+                    if key in PRODUCTS or key == "FTS_FLAG":
+                        val = parse_bool(val)
+                    elif key == "REVENUE_COMPANY":
+                        val = parse_number(val)
+                        if val is not None and val < 0:
+                            raise ValueError("Отрицательная выручка")
+                    features[key] = feature(val, f"{filename}, строка {line}, {key}", label=PRODUCTS.get(key, key))
+                if row.get("GROUP_ID") and len(row["GROUP_ID"]) > 100:
+                    raise ValueError("Слишком длинный GROUP_ID")
+                if "REVENUE_COMPANY" in features:
+                    features["REVENUE_COMPANY"]["unit"] = "unknown"
+                batch.append(dict(id=company_id, name=f"Компания {company_id}",
+                    industry=(row.get("MAINOKVED_NAME") or "Не указана")[:250],
+                    region=(row.get("REGION") or "Не указан")[:150], group_id=row.get("GROUP_ID"),
+                    features=features, synthetic=synthetic, updated_at=utcnow()))
+                seen.add(company_id)
+                ids.append(company_id)
+            else:
+                source = row.get("PAYER" if kind == "payments" else "SYNTHETIC_F")
+                target = row.get("BENEFICIARY" if kind == "payments" else "SYNTHETIC_U")
+                if not source or not target or max(len(source), len(target)) > 100:
+                    raise ValueError("Отсутствует или слишком длинный идентификатор связи")
+                link_id = digest(f"{kind}:{source}:{target}")
+                if link_id in seen:
+                    raise ValueError("Повторная пара идентификаторов: агрегируйте платежи до импорта")
+                amount = parse_number(row.get("PAY_AMT"))
+                count = parse_number(row.get("PAY_CNT"))
+                if amount is not None and amount < 0 or count is not None and (count < 0 or not count.is_integer()):
+                    raise ValueError("Некорректные PAY_AMT/PAY_CNT")
+                batch.append(dict(id=link_id, kind="payment" if kind == "payments" else "person",
+                    source_id=source, target_id=target, amount=amount, count=int(count) if count is not None else None,
+                    details={"source": filename, "line": line, "unit": "unknown",
+                             "unknown_target": target not in known_companies}))
+                seen.add(link_id)
             imported += 1
         except (ValueError, TypeError) as exc:
-            errors.append({"line": line, "message": str(exc)})
+            error_count += 1
+            if len(errors) < 200:
+                errors.append({"line": line, "message": str(exc)})
+        if len(batch) >= 250:
+            flush_batch()
+    flush_batch()
     db.commit()
-    return {"kind": kind, "imported": imported, "errors": errors, "company_ids": ids, "synthetic": synthetic,
+    db.expire_all()
+    return {"kind": kind, "imported": imported, "errors": errors, "error_count": error_count,
+            "errors_truncated": error_count > len(errors), "company_ids": ids, "synthetic": synthetic,
             "warnings": ["Единицы выручки и платежей, а также период платежей должны быть подтверждены по описанию набора."]}
 
 
-def extract_pdf(raw):
+def extract_pdf(raw, with_pages=False):
     reader = PdfReader(io.BytesIO(raw))
     if len(reader.pages) > 150:
         raise ValueError("Максимум 150 страниц")
-    texts, chunks = [], []
-    for n, page in enumerate(reader.pages, 1):
-        text = clean_text(page.extract_text() or "")
+    texts, chunks, pages = [], [], []
+    extracted = [clean_text(page.extract_text() or "") for page in reader.pages]
+    scanned = [n for n, text in enumerate(extracted, 1) if len(text) < 100]
+    if scanned:
+        from .ocr import recognize_pages
+        recognized = recognize_pages(raw, scanned)
+    else:
+        recognized = {}
+    for n, text in enumerate(extracted, 1):
+        if n in recognized:
+            text = clean_text(recognized[n]['text'])
         texts.append(text)
-        chunks.extend(chunks_for(text, n))
+        pages.append({'number': n, 'text': text, 'confidence': recognized[n]['confidence'] if n in recognized else 100})
+        page_chunks = pdf_chunks(text, n)
+        for chunk in page_chunks:
+            chunk['extraction'] = 'ocr' if n in recognized else 'text'
+            chunk['confidence'] = recognized[n]['confidence'] if n in recognized else None
+        chunks.extend(page_chunks)
     if sum(map(len, texts)) < 100:
         raise ValueError("В PDF нет извлекаемого текста. Нужен текстовый PDF или предварительное распознавание разрешенной моделью.")
-    return "\n".join(texts), chunks
+    result = ("\n".join(texts), chunks)
+    return (*result, pages) if with_pages else result
 
 
 def safe_fetch(url):

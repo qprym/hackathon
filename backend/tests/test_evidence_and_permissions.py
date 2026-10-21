@@ -58,7 +58,8 @@ def test_inaccessible_profiles_never_enter_live_model_context(client, db, monkey
         result = viewer.get('/api/runs/' + run_id).json()
         assert result['status'] == 'completed'
         assert result['result']['verification'] == 'checked'
-        assert contexts and all(c['group'] == [{'id': 'demo-metal', 'industry': 'Производство металлических изделий'}] for c in contexts)
+        assert contexts and all([g['id'] for g in c['group']] == ['demo-metal'] for c in contexts)
+        assert all(c['group'][0]['industry'] == 'Производство металлических изделий' for c in contexts)
 
 
 def test_revoked_permissions_hide_old_results_and_invalidate_cache(client, db):

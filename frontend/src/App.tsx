@@ -54,6 +54,7 @@ type Feature = {
   source: string;
   status: string;
   label: string;
+  unit?: string;
 };
 type Context = Company & {
   features: Record<string, Feature>;
@@ -67,6 +68,7 @@ type Context = Company & {
     direction: string;
   }[];
   group: { id: string; industry: string }[];
+  shared_person_links: { company_id: string; relation: string }[];
 };
 type EventItem = {
   id: string;
@@ -126,12 +128,13 @@ type Run = {
   trace: { step: string; at: string; details: unknown }[];
 };
 type Source = {
+  id: string;
   title: string;
   content: string;
   publisher: string;
   url: string | null;
   synthetic: boolean;
-  ingestion: { coverage?: string; fetched_at?: string; warning?: string };
+  ingestion: { coverage?: string; fetched_at?: string; warning?: string; original_file?: string; extraction?: string; date_source?: string };
   chunks: { page: number | null; text: string }[];
 };
 type FeedStatus = {
@@ -148,6 +151,7 @@ type FeedStatus = {
   }[];
 };
 type Metrics = {
+  llm_allowance: { request_limit: number; requests_used: number; requests_remaining: number; spent_rub: number; test_limit_rub: number };
   runs: Record<string, number>;
   feedback: Record<string, number>;
   budgets: { day: string; spent_rub: number }[];
@@ -212,7 +216,7 @@ const date = (value: string) =>
     day: "numeric",
     month: "short",
   });
-const formatValue = (key: string, value: unknown): string =>
+const formatValue = (key: string, value: unknown, unit?: string): string =>
   value === null || value === undefined
     ? "Нет данных"
     : typeof value === "boolean"
@@ -220,7 +224,8 @@ const formatValue = (key: string, value: unknown): string =>
         ? "Да"
         : "Нет"
       : key === "REVENUE_COMPANY"
-        ? `${(Number(value) / 1e9).toLocaleString("ru-RU", { maximumFractionDigits: 1 })} млрд ₽`
+        ? unit === "unknown" ? `${Number(value).toLocaleString("ru-RU")} · ед. не указаны`
+          : `${(Number(value) / 1e9).toLocaleString("ru-RU", { maximumFractionDigits: 1 })} млрд ₽`
         : key === "outgoing_concentration"
           ? `${Math.round(Number(value) * 100)}%`
           : String(value);
@@ -228,9 +233,7 @@ const formatValue = (key: string, value: unknown): string =>
 function Logo() {
   return (
     <div className="brand">
-      <span className="brand-symbol">
-        А<span />
-      </span>
+      <img className="brand-symbol" src="/alfa-symbol.png" width="39" height="40" alt="Альфа-Банк" />
       <span>
         Альфа<span className="brand-light">Бизнес</span>
       </span>
@@ -360,7 +363,7 @@ function Login({ onLogin }: { onLogin: (u: User) => void }) {
           <p className="login-help">
             <ShieldCheck size={18} /> Демоаккаунт: demo / demo-alfa-2026.
             <br />
-            Компании и начальные материалы синтетические.
+            Учебные профили и материалы отмечены отдельно.
           </p>
         </div>
       </section>
@@ -397,6 +400,7 @@ function ContextPanel({
             {formatValue(
               "REVENUE_COMPANY",
               context.features.REVENUE_COMPANY?.value,
+              context.features.REVENUE_COMPANY?.unit,
             )}
           </strong>
         </div>
@@ -431,13 +435,13 @@ function ContextPanel({
               {Object.entries(context.features).map(([k, f]) => (
                 <div key={k}>
                   <span>
-                    {labels[k] || k}
+                    {labels[k] || f.label || k}
                     <small>
                       {f.status === "calculated" ? "Расчет" : "Исходные данные"}{" "}
                       · {f.source}
                     </small>
                   </span>
-                  <strong>{formatValue(k, f.value)}</strong>
+                  <strong>{formatValue(k, f.value, f.unit)}</strong>
                 </div>
               ))}
             </div>
@@ -446,7 +450,7 @@ function ContextPanel({
             <h3>Платежные связи</h3>
             <p className="muted small">
               Связь показывает платежи внутри выборки и не определяет тип
-              договора.
+              договора. Суммы показаны в единицах исходного файла; валюта и период требуют уточнения.
             </p>
             {context.counterparties.length ? (
               context.counterparties.map((c, i) => (
@@ -466,6 +470,13 @@ function ContextPanel({
             ) : (
               <p className="muted">Связи не загружены</p>
             )}
+          </div>
+          <div className="panel">
+            <h3>Группа и общие связи</h3>
+            <p className="muted small">Показаны только доступные вам профили. Общее физлицо не доказывает владение или должность.</p>
+            {context.group.map((c) => <div className="connection" key={c.id}><Building2 size={18} /><span>{c.id}<small>{c.industry}</small></span></div>)}
+            {context.shared_person_links.map((c) => <div className="connection" key={c.company_id}><Layers3 size={18} /><span>{c.company_id}<small>{c.relation}</small></span></div>)}
+            {!context.group.length && !context.shared_person_links.length && <p className="muted">Доступных связанных профилей нет.</p>}
           </div>
         </>
       ) : (
@@ -635,7 +646,7 @@ function ImportPanel({ onChange }: { onChange: () => void }) {
             <label className="upload-zone">
               <FileText size={30} />
               <strong>Выберите {tab.toUpperCase()} файл</strong>
-              <span>До 20 МБ</span>
+              <span>До 64 МБ · сканы PDF распознаются локально</span>
               <input
                 type="file"
                 name="file"
@@ -648,7 +659,7 @@ function ImportPanel({ onChange }: { onChange: () => void }) {
             <p className="form-note">
               Компании: SYNTHETIC_U + MAINOKVED_CODE. Связи: SYNTHETIC_F +
               SYNTHETIC_U. Платежи: PAYER + BENEFICIARY + PAY_AMT + PAY_CNT.
-              Импортированные компании добавятся текущему администратору.
+              Первые 100 импортированных компаний добавятся текущему администратору. Для полного набора и выбора доступных профилей есть локальная команда импорта из README.
             </p>
           )}
           {tab === "pdf" && (
@@ -744,7 +755,13 @@ function Claims({
                 {labels[k] || k}
               </span>
             ))}
-            {claim.evidence_ids.map((id) => {
+            {claim.evidence_ids.filter((id, i, all) => {
+              const item = insight.evidence.find((e) => e.id === id);
+              return all.findIndex((ref) => {
+                const candidate = insight.evidence.find((e) => e.id === ref);
+                return candidate?.document_id === item?.document_id && candidate?.page === item?.page;
+              }) === i;
+            }).map((id) => {
               const e = insight.evidence.find((e) => e.id === id);
               return (
                 e && (
@@ -755,7 +772,7 @@ function Claims({
                     title={e.title}
                   >
                     <FileText size={12} /> Источник{" "}
-                    {insight.evidence.indexOf(e) + 1}
+                    {[...new Set(insight.evidence.map((item) => item.document_id))].indexOf(e.document_id) + 1}
                     {e.page ? ` · стр. ${e.page}` : ""}
                   </button>
                 )
@@ -885,7 +902,7 @@ function Analysis({
             >
               <ShieldCheck size={13} />
               {insight.verification === "checked"
-                ? "Основания проверены"
+                ? insight.mode === "demo" ? "Ссылки проверены · демо" : "Основания проверены"
                 : "Ограниченные основания"}
             </span>
           </div>
@@ -920,7 +937,7 @@ function Analysis({
               className={tab === "sources" ? "active" : ""}
               onClick={() => setTab("sources")}
             >
-              Источники <span>{insight.evidence.length}</span>
+              Источники <span>{new Set(insight.evidence.map((e) => e.document_id)).size}</span>
             </button>
             <button
               className={tab === "trace" ? "active" : ""}
@@ -1102,7 +1119,7 @@ function Analysis({
           )}
           {tab === "sources" && (
             <div className="sources-grid">
-              {insight.evidence.map((e, i) => (
+              {insight.evidence.filter((e, i, all) => all.findIndex((item) => item.document_id === e.document_id) === i).map((e, i) => (
                 <div className="panel source-card" key={e.id}>
                   <span className="overline">
                     ИСТОЧНИК {i + 1} ·{" "}
@@ -1195,6 +1212,10 @@ function MetricsPanel() {
         </div>
         <div className="panel">
           <h3>Бюджет моделей</h3>
+          <div className="context-line"><span>Обращения за весь тест</span><strong>{metrics.llm_allowance.requests_used} / {metrics.llm_allowance.request_limit}</strong></div>
+          <div className="context-line"><span>Общий денежный потолок</span><strong>{metrics.llm_allowance.test_limit_rub} ₽</strong></div>
+          <div className="context-line"><span>Расход теста</span><strong>{metrics.llm_allowance.spent_rub.toFixed(3)} ₽</strong></div>
+          {!metrics.llm_allowance.test_limit_rub && <p className="form-note">Платные обращения заблокированы до задания денежного лимита.</p>}
           {metrics.budgets.length ? (
             metrics.budgets.map((b) => (
               <div className="context-line" key={b.day}>
@@ -1222,6 +1243,13 @@ function MetricsPanel() {
       </div>
     </>
   );
+}
+
+function BankLibrary({ onSource }: { onSource: (id: string) => void }) {
+  const [items, setItems] = useState<{ id: string; title: string; publisher: string; published_at: string; synthetic: boolean; pages: number; extraction: string; date_kind: string }[]>([]);
+  const [error, setError] = useState("");
+  useEffect(() => { api<typeof items>("/library").then(setItems).catch((e) => setError(e.message)); }, []);
+  return <><p className="muted">Дата материала — граница актуальности позиции банка. Сканы распознаны локально; оригинал доступен для сверки.</p>{error && <ErrorBox error={error} />}<div className="sources-grid">{items.map((item) => <div className="panel source-card" key={item.id}><span className="overline">{item.synthetic ? "УЧЕБНЫЙ ПРИМЕР" : "АЛЬФА-БАНК"}</span><h3>{item.title}</h3><p className="muted small">{item.date_kind === "observed_at" ? "Загружен " : ""}{new Date(item.published_at).toLocaleDateString("ru-RU")} · {item.pages || "—"} стр. · {item.extraction === "ocr" ? "OCR" : "Текст"}</p><button className="text-button" onClick={() => onSource(item.id)}>Открыть материал <ArrowUpRight size={15} /></button></div>)}</div></>;
 }
 
 export default function App() {
@@ -1314,7 +1342,7 @@ export default function App() {
         if (active) setFeedStatus(status);
         if (companyId && page === "feed" && !runId) {
           const feed = await api<{ items: EventItem[]; topics: Record<string, string> }>(
-            `/feed?company_id=${encodeURIComponent(companyId)}&role=${role}&corpus=${corpus}`,
+            `/feed?company_id=${encodeURIComponent(companyId)}&role=${role}&corpus=${corpus}&q=${encodeURIComponent(search)}&topic=${encodeURIComponent(topic)}`,
           );
           if (active) { setItems(feed.items); setTopics(feed.topics); }
         }
@@ -1324,7 +1352,7 @@ export default function App() {
     void refresh();
     const timer = window.setInterval(() => void refresh(), 15000);
     return () => { active = false; window.clearInterval(timer); };
-  }, [user, companyId, role, corpus, page, runId, revision]);
+  }, [user, companyId, role, corpus, page, runId, revision, search, topic]);
   useEffect(() => {
     const close = (event: KeyboardEvent) => {
       if (event.key === "Escape") setSource(null);
@@ -1405,6 +1433,7 @@ export default function App() {
             <Building2 size={19} />
             Контекст компании
           </button>
+          <button className={page === "library" ? "active" : ""} onClick={() => navigate("library")}><BookOpen size={19} />Аналитика банка</button>
           {user.is_admin && (
             <>
               <div className="workspace-label">РАБОТА С ДАННЫМИ</div>
@@ -1470,7 +1499,7 @@ export default function App() {
                   : page === "context"
                     ? "Контекст компании"
                     : page === "import"
-                      ? "Источники и данные"
+                      ? "Источники и данные" : page === "library" ? "Аналитика банка"
                       : "Качество и бюджет"}
               </h1>
               <p className="muted">
@@ -1480,6 +1509,7 @@ export default function App() {
                     ? "Факты, связи и ограничения, на которых строится персонализация."
                     : page === "import"
                       ? "Добавляйте материалы и проверяйте анализ на новых событиях."
+                      : page === "library" ? "Исследования банка, даты и оригиналы для проверки оснований."
                       : "Прозрачность работы сервиса и обратная связь пользователей."}
               </p>
             </div>
@@ -1719,6 +1749,7 @@ export default function App() {
             <ImportPanel onChange={() => setRevision((r) => r + 1)} />
           )}
           {page === "metrics" && user.is_admin && <MetricsPanel />}
+          {page === "library" && <BankLibrary onSource={openSource} />}
           <footer className="footer">
             <span>Альфа · Контекст</span>
             <span>Источники → контекст → проверяемые выводы</span>
@@ -1756,11 +1787,13 @@ export default function App() {
             )}
             {source.ingestion?.coverage && <p className="source-coverage">
               <span className={"pill " + (source.ingestion.coverage === "summary" ? "amber" : "")}>
-                {source.ingestion.coverage === "summary" ? "Только RSS-аннотация" : "Текст статьи"}
+                {source.ingestion.coverage === "summary" ? "Только RSS-аннотация" : source.ingestion.extraction === "ocr" ? "Распознанный PDF · OCR" : "Текст материала"}
               </span>
               {source.ingestion.fetched_at && <span className="muted small">Загружено {new Date(source.ingestion.fetched_at).toLocaleString("ru-RU")}</span>}
             </p>}
             {source.ingestion?.warning && <p className="muted small">{source.ingestion.warning}</p>}
+            {source.ingestion?.date_source && <p className="muted small">Основание даты: {source.ingestion.date_source}</p>}
+            {source.ingestion?.original_file && <a className="text-button" href={`/api/sources/${source.id}/original`} target="_blank" rel="noopener noreferrer">Скачать оригинальный PDF <ExternalLink size={16} /></a>}
             <div className="source-content">{source.content}</div>
             {source.url && /^https?:\/\//.test(source.url) && (
               <a

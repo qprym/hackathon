@@ -12,6 +12,8 @@ Main third-party components (licenses must be rechecked when upgrading):
 - psycopg — LGPL-3.0; psycopg-binary includes libpq and related components
 - PostgreSQL — PostgreSQL License
 - pypdf — BSD-3-Clause
+- Poppler command-line PDF rasterizer — GPL-2.0-or-later; Debian package retains its notices
+- Tesseract OCR and rus/eng language data — Apache-2.0; Leptonica — BSD-2-Clause
 - Beautiful Soup — MIT; defusedxml — PSF License
 - python-multipart, python-dotenv — Apache-2.0 / BSD-3-Clause respectively
 - React, React DOM, Vite — MIT
@@ -23,6 +25,7 @@ Main third-party components (licenses must be rechecked when upgrading):
 - Caddy — Apache-2.0
 - Docker Official Images — individual component and image licenses apply
 - Manrope font — SIL Open Font License 1.1; served by Google Fonts with system-font fallback
+- Alfa-Bank emblem in frontend/public/alfa-symbol.png — supplied by the project owner; trademark rights remain with Alfa-Bank. Used to illustrate the case interface.
 
 Resolved dependencies: backend/requirements.lock, frontend/package-lock.json.
 Package distributions retain their own notices and license files.
@@ -48,3 +51,6 @@ Synthetic datasets and simulated integrations:
 - CSVs from the organizer, actual Alfa-Bank research, bank SSO, payment systems,
   actual model API and an external deployment are not bundled.
 - Lexical retrieval, scoring and demo interpretations are project-owned rules.
+- Locally downloaded organizer files and OCR results reside in ignored data/private/;
+  original imported PDFs persist in the source_files Docker volume. The repository
+  contains only the source/date manifest and import tools, not those case documents.

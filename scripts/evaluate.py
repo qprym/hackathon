@@ -2,6 +2,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from datetime import datetime
 root = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(root / 'backend'))
 from app.context import company_context
@@ -22,14 +23,14 @@ if missing or not dataset.get('reviewer') or not dataset.get('reviewed_at'):
     raise SystemExit(2)
 results = {}
 with SessionLocal() as db:
-    for company_id in ['demo-metal','demo-retail','demo-logistics']:
+    for company_id in dataset.get('companies', ['demo-metal','demo-retail','demo-logistics']):
         company = db.get(Company,company_id)
         if company is None:
             raise SystemExit('Seed the demo database before evaluating. Set DATABASE_URL to the intended instance.')
         context = company_context(db,company)
         for role in ['CEO','CFO','TREASURER']:
             key = f'{company_id}:{role}'
-            ordered = sorted(records,key=lambda r:rank_event(Event(title=r['title'],topics=r['topics'],published_at=utcnow(),document_ids=[]),context,role)['score'],reverse=True)
+            ordered = sorted(records,key=lambda r:rank_event(Event(title=r['title'],topics=r['topics'],published_at=datetime.fromisoformat(r['published_at'].rstrip('Z')) if r.get('published_at') else utcnow(),document_ids=r.get('document_ids', [])),context,role)['score'],reverse=True)
             top = ordered[:5]
             if any(r['relevance'][key] not in [0,1,2] for r in ordered):
                 raise SystemExit('Relevance labels must be 0, 1 or 2.')

@@ -249,7 +249,7 @@ form {
 .brand {
   display: flex;
   align-items: center;
-  gap: 11px;
+  gap: 4px;
   font-size: 23px;
   font-weight: 800;
   letter-spacing: -1px;
@@ -260,21 +260,12 @@ form {
   margin-left: 3px;
 }
 .brand-symbol {
-  position: relative;
-  color: var(--red);
-  font-size: 38px;
-  line-height: 1;
-  font-weight: 800;
-  letter-spacing: -3px;
-  width: 29px;
-}
-.brand-symbol span {
-  position: absolute;
-  left: 2px;
-  right: 1px;
-  height: 3px;
-  background: var(--red);
-  bottom: -4px;
+  display: block;
+  flex: none;
+  width: 48px;
+  height: auto;
+  object-fit: contain;
+  mix-blend-mode: multiply;
 }
 .login-shell {
   display: grid;
@@ -438,8 +429,7 @@ form {
   margin-bottom: 52px;
 }
 .sidebar .brand-symbol {
-  font-size: 32px;
-  width: 26px;
+  width: 44px;
 }
 .workspace-label {
   font-size: 8px;
@@ -1992,9 +1982,6 @@ form {
   }
   .login-story .brand {
     font-size: 21px;
-  }
-  .login-story .brand-symbol {
-    font-size: 32px;
   }
   .feedback {
     gap: 6px;

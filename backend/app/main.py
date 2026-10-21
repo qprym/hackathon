@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Literal
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 from .auth import admin, authorize_company, current_user, make_session, token_hash, verify_password
@@ -127,12 +127,16 @@ def context(company_id: str, user: User = Depends(current_user), db: Session = D
 
 @app.get("/api/feed")
 def feed(company_id: str, role: Role = "CFO", topic: str | None = None, corpus: Literal["real", "synthetic"] = "real",
+         q: str = "",
          user: User = Depends(current_user), db: Session = Depends(get_db)):
     company = authorize_company(db, user, company_id)
     ctx = company_context(db, company, user.company_ids)
     if corpus == "synthetic" and not company.synthetic:
         raise HTTPException(422, "Учебные события доступны только для учебных профилей")
-    events = db.scalars(select(Event).where(Event.synthetic == (corpus == "synthetic")).order_by(Event.published_at.desc()).limit(500)).all()
+    stmt = select(Event).where(Event.synthetic == (corpus == "synthetic"))
+    if q.strip():
+        stmt = stmt.where(Event.title.icontains(q.strip()[:200], autoescape=True))
+    events = db.scalars(stmt.order_by(Event.published_at.desc()).limit(500)).all()
     entries = []
     for event in events:
         if topic and topic not in event.topics:
@@ -162,11 +166,11 @@ def create_run(db, user, body, question=None, parent=None):
     # Corpus and relationship versions invalidate previously generated explanations.
     documents = db.execute(select(Document.id, Document.content_hash).where(Document.synthetic == event.synthetic)
                            .order_by(Document.id)).all()
-    links = db.execute(select(Link.id, Link.amount, Link.count).order_by(Link.id)).all()
+    context_version = company_context(db, company, user.company_ids)
     access_scope = sorted(set(user.company_ids))
     key = hashlib.sha256(json.dumps([user.id, access_scope, body.model_dump(), company.features, str(company.updated_at),
-        [list(d) for d in documents], [list(l) for l in links], question, parent, settings().demo_mode,
-        settings().llm_analysis_id, settings().llm_extraction_id, "prompt-v4"], sort_keys=True, default=str).encode()).hexdigest()
+        [list(d) for d in documents], context_version, question, parent, settings().demo_mode,
+        settings().llm_analysis_id, settings().llm_extraction_id, "prompt-v7"], sort_keys=True, default=str).encode()).hexdigest()
     existing = db.scalar(select(Run).where(Run.cache_key == key, Run.status.in_(["queued", "running", "completed"])).order_by(Run.created_at.desc()))
     if existing:
         return {"run_id": existing.id, "cached": existing.status == "completed"}
@@ -234,6 +238,15 @@ def source(source_id: str, user: User = Depends(current_user), db: Session = Dep
             "chunks": doc.chunks, "synthetic": doc.synthetic, "ingestion": doc.ingestion_meta}
 
 
+@app.get("/api/library")
+def library(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    return [{"id": d.id, "title": d.title, "publisher": d.publisher,
+        "published_at": d.published_at.isoformat() + 'Z', "synthetic": d.synthetic,
+        "pages": d.ingestion_meta.get('page_count', len({c.get('page') for c in d.chunks if c.get('page')})), "extraction": d.ingestion_meta.get('extraction', 'text'),
+        "date_kind":d.ingestion_meta.get('date_kind','publication'), "date_source":d.ingestion_meta.get('date_source','Дата загрузившего материал')}
+        for d in db.scalars(select(Document).where(Document.kind == 'bank').order_by(Document.synthetic, Document.published_at.desc()).limit(200))]
+
+
 @app.post("/api/admin/news")
 def add_news(body: NewsInput, user: User = Depends(admin), db: Session = Depends(get_db)):
     try:
@@ -248,13 +261,17 @@ def add_news(body: NewsInput, user: User = Depends(admin), db: Session = Depends
 
 
 @app.post("/api/admin/import/csv")
-async def upload_csv(file: UploadFile = File(...), synthetic: bool = Form(False), user: User = Depends(admin), db: Session = Depends(get_db)):
-    raw = await file.read(20_000_001)
-    if len(raw) > 20_000_000:
-        raise HTTPException(413, "Максимум 20 МБ")
+def upload_csv(file: UploadFile = File(...), synthetic: bool = Form(False), user: User = Depends(admin), db: Session = Depends(get_db)):
+    raw = file.file.read(64_000_001)
+    if len(raw) > 64_000_000:
+        raise HTTPException(413, "Максимум 64 МБ")
     try:
         report = import_csv(db, raw, Path(file.filename or "data.csv").name, synthetic=synthetic)
-        user.company_ids = list(dict.fromkeys([*user.company_ids, *report["company_ids"]]))
+        user.company_ids = list(dict.fromkeys([*user.company_ids, *report["company_ids"][:100]]))
+        report['company_count'] = len(report['company_ids'])
+        if len(report['company_ids']) > 100:
+            report['warnings'].append('Для просмотра доступны первые 100 импортированных компаний. Для выдачи доступа к другим профилям используйте локальную команду case_import --grant.')
+        report['company_ids'] = report['company_ids'][:100]
         db.add(Audit(action="csv_import", actor=user.id, details={k: v for k, v in report.items() if k != "company_ids"}))
         db.commit()
         return report
@@ -264,21 +281,36 @@ async def upload_csv(file: UploadFile = File(...), synthetic: bool = Form(False)
 
 
 @app.post("/api/admin/import/pdf")
-async def upload_pdf(file: UploadFile = File(...), title: str = Form(...), published_at: datetime = Form(...),
+def upload_pdf(file: UploadFile = File(...), title: str = Form(...), published_at: datetime = Form(...),
     synthetic: bool = Form(False), user: User = Depends(admin), db: Session = Depends(get_db)):
-    raw = await file.read(20_000_001)
-    if len(raw) > 20_000_000:
-        raise HTTPException(413, "Максимум 20 МБ")
+    raw = file.file.read(64_000_001)
+    if len(raw) > 64_000_000:
+        raise HTTPException(413, "Максимум 64 МБ")
     try:
-        content, chunks = extract_pdf(raw)
+        content, chunks, pages = extract_pdf(raw, with_pages=True)
+        original = hashlib.sha256(raw).hexdigest() + '.pdf'
+        Path('uploads').mkdir(exist_ok=True)
+        Path('uploads', original).write_bytes(raw)
         doc, created = import_document(db, title=title, content=content, chunks=chunks, kind="bank",
             publisher="Синтетический пример" if synthetic else "Альфа-Банк · материалы кейса",
-            published_at=published_at, synthetic=synthetic)
+            published_at=published_at, synthetic=synthetic, ingestion_meta={"original_file": original, "page_count":len(pages),
+                "coverage": "provided", "extraction": "ocr" if any(c.get('extraction') == 'ocr' for c in chunks) else "pdf",
+                "warning": "Текст PDF/OCR: числа, таблицы и графики необходимо сверять с оригиналом."})
         return {"document_id": doc.id, "created": created,
                 "warning": "Извлечен текст. Графики и таблицы нужно сверить с оригиналом; выводы не опираются на нераспознанные изображения."}
     except Exception as exc:
         db.rollback()
         raise HTTPException(422, "Не удалось импортировать PDF: " + (str(exc)[:200] if isinstance(exc, ValueError) else "проверьте формат")) from exc
+
+
+@app.get("/api/sources/{source_id}/original")
+def original_pdf(source_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    doc = db.get(Document, source_id)
+    name = doc.ingestion_meta.get('original_file', '') if doc else ''
+    path = Path('uploads') / Path(name).name
+    if not name or not path.is_file():
+        raise HTTPException(404, "Оригинал не сохранён")
+    return FileResponse(path, media_type='application/pdf', filename='bank-research.pdf')
 
 
 @app.post("/api/admin/feeds/{key}")

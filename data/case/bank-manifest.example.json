@@ -1,0 +1,74 @@
+[
+  {
+    "filename": "ALFA-7M26.pdf",
+    "title": "Макростатистика 7М26: рынок труда не подтверждает охлаждения",
+    "date": "2026-09-07",
+    "date_source": "Дата на первой странице",
+    "url": "https://drive.google.com/file/d/1HZDq3WGRFdzgm1TZ5hWL23Q3I9c2Eq64/view",
+    "date_kind": "publication"
+  },
+  {
+    "filename": "ALFA-consumption.pdf",
+    "title": "Потребление на пике",
+    "date": "2026-08-05",
+    "date_source": "Дата на первой странице",
+    "url": "https://drive.google.com/file/d/1riR1lhsb6EY1MwGMxdBlS_tI5ed9mIiz/view",
+    "date_kind": "publication"
+  },
+  {
+    "filename": "ALFA-Macro_Insights-Policy_Rate_11Sep.pdf",
+    "title": "Ключевая ставка ЦБ РФ: 14,0%, риторика стала жестче",
+    "date": "2026-09-11",
+    "date_source": "Дата на первой странице",
+    "url": "https://drive.google.com/file/d/1shHG89LtMgHT1_uEebHmQSFZe_zbeq7-/view",
+    "date_kind": "publication"
+  },
+  {
+    "filename": "ALFA-macro_stat1H26.pdf",
+    "title": "Макростатистика 1П26: прогноз роста ВВП 0,1%",
+    "date": "2026-07-31",
+    "date_source": "Дата на первой странице",
+    "url": "https://drive.google.com/file/d/1khcHwoS0FkG9p_0J4XoHGaGq3B4V0ime/view",
+    "date_kind": "publication"
+  },
+  {
+    "filename": "ALFA_Russian_Steels_1К21PreviewUpdate_15Apr2021.pdf",
+    "title": "Российская сталь: прогноз результатов 1К21",
+    "date": "2021-04-15",
+    "date_source": "Дата в правой колонке первой страницы; исторический материал 2021 года",
+    "url": "https://drive.google.com/file/d/1yLCBrIoyIsubLTEBvBHh6io48ysnW-wn/view",
+    "date_kind": "publication"
+  },
+  {
+    "filename": "FI_Strategy_3Q26_22072026.pdf",
+    "title": "Тактический взгляд на 3-й квартал 2026: время собирать камни",
+    "date": "2026-07-22",
+    "date_source": "Дата 22 июля 2026 в предисловии",
+    "url": "https://drive.google.com/file/d/1hq3Fhyz9ce_sRyGUQB1MdoHeQdfAJfhK/view",
+    "date_kind": "publication"
+  },
+  {
+    "filename": "Inflation_tracker_02.pdf",
+    "title": "Инфляция 25–31 августа: основные выводы",
+    "date": "2026-09-02",
+    "date_source": "Дата на первой странице",
+    "url": "https://drive.google.com/file/d/19iW3Ph8_wO0HHQY7Ik4lTfC3jRc9gjWV/view",
+    "date_kind": "publication"
+  },
+  {
+    "filename": "Бонд_Бриф_14092026.pdf",
+    "title": "Бонд Бриф: итоги недели",
+    "date": "2026-09-14",
+    "date_source": "Дата 14092026 в имени файла организаторов",
+    "url": "https://drive.google.com/file/d/1bPzix_332N2CyMY0tqCHuYtGsfJWnFGv/view",
+    "date_kind": "publication"
+  },
+  {
+    "filename": "Gold_digest_August26.pdf",
+    "title": "Обзор рынка золота: август 2026",
+    "date": null,
+    "date_source": "В PDF указан период август 2026, точная дата публикации неизвестна. Для временного отсечения используется момент локальной загрузки, а не предполагаемая дата публикации.",
+    "url": "https://drive.google.com/file/d/1a7TXOCHARfKzUR0hn9Cm9gQSrIldxTDE/view",
+    "date_kind": "observed_at"
+  }
+]

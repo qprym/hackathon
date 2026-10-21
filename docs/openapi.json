@@ -200,6 +200,16 @@
               "default": "real",
               "title": "Corpus"
             }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Q"
+            }
           }
         ],
         "responses": {
@@ -444,6 +454,22 @@
         }
       }
     },
+    "/api/library": {
+      "get": {
+        "summary": "Library",
+        "operationId": "library_api_library_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/admin/news": {
       "post": {
         "summary": "Add News",
@@ -530,6 +556,43 @@
           },
           "required": true
         },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sources/{source_id}/original": {
+      "get": {
+        "summary": "Original Pdf",
+        "operationId": "original_pdf_api_sources__source_id__original_get",
+        "parameters": [
+          {
+            "name": "source_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Source Id"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",

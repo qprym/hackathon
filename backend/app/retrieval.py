@@ -26,6 +26,7 @@ ROLE_WEIGHTS = {
 
 def classify(text):
     lower = text.casefold()
+    lower = re.sub(r'кредитн\w*\s+рейтинг\w*', 'рейтинг', lower)
     def matches(stem):
         # «ставка» must not match «поставка»; «порт» must not match «портфель».
         pattern = r"\bпорт(?:а|у|ом|е|ы|ов|ам|ах|ами)?\b" if stem == "порт" else r"\b" + re.escape(stem)
@@ -97,24 +98,52 @@ def search_documents(db, query, kind=None, before=None, synthetic=False, limit=6
     scored = []
     for doc in unique.values():
         for index, chunk in enumerate(doc.chunks):
+            if chunk.get('extraction') == 'ocr' and chunk.get('confidence', 0) < 65:
+                continue
+            if kind == 'bank':
+                body = chunk['text']
+                if chunk.get('extraction') == 'ocr' and (not re.match(r'^[А-ЯЁA-Z]', body) or not re.search(r'[.!?:;]$', body)):
+                    continue
+                if len(re.findall(r'[а-яёa-z]{3,}', body.lower())) < 15:
+                    continue
+                if re.search(r'финансовые результаты.{0,100}(?:МСФО|отчетност)|данный материал распространяется|не является индивидуальной инвестиционной', body, re.I|re.S):
+                    continue
+                if sum(c.isdigit() for c in body) / max(len(body), 1) > .16:
+                    continue
             overlap = len(query_tokens & tokens(chunk["text"]))
-            topic_match = len(query_topics & set(doc.topics))
+            topic_match = len(query_topics & set(classify(chunk['text'])))
+            if not overlap:
+                continue
             if query_topics and not topic_match and overlap < 3:
                 continue
             if not query_topics and overlap < 2:
                 continue
-            score = overlap + topic_match * 3
+            title_match = len(query_tokens & tokens(doc.title))
+            score = overlap + topic_match * 3 + title_match * 2
+            score += len(query_topics & set(classify(doc.title))) * 2
+            if before:
+                score -= min(max((before - doc.published_at).days - 90, 0) / 365, 5)
             if score:
                 scored.append((score, doc, index, chunk))
     scored.sort(key=lambda row: (row[0], row[1].published_at), reverse=True)
-    return [evidence(doc, index, chunk) for _, doc, index, chunk in scored[:limit]]
+    result, counts = [], {}
+    for _, doc, index, chunk in scored:
+        if kind == 'bank' and counts.get(doc.id, 0) >= 2:
+            continue
+        result.append(evidence(doc, index, chunk))
+        counts[doc.id] = counts.get(doc.id, 0) + 1
+        if len(result) >= limit:
+            break
+    return result
 
 
 def evidence(doc, index, chunk):
     return {"id": f"{doc.id}:{index}", "document_id": doc.id, "title": doc.title, "kind": doc.kind,
             "publisher": doc.publisher, "url": doc.url, "published_at": doc.published_at.isoformat() + "Z",
             "excerpt": chunk["text"], "page": chunk.get("page"), "synthetic": doc.synthetic,
-            "coverage": doc.ingestion_meta.get("coverage", "provided")}
+            "coverage": doc.ingestion_meta.get("coverage", "provided"),
+            "extraction": chunk.get('extraction', 'text'), "confidence": chunk.get('confidence'),
+            "date_kind": doc.ingestion_meta.get('date_kind','publication'), "date_source":doc.ingestion_meta.get('date_source')}
 
 
 def event_evidence(db, event):

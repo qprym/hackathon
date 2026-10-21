@@ -20,6 +20,12 @@ POLICY = """Ты аналитический компонент сервиса д
 Для сценарных последствий используй условные формулировки и assumption=true.
 Для каждого утверждения возвращай evidence_ids и feature_keys; не изобретай идентификаторы.
 Нельзя ссылаться на источник, который не подтверждает утверждение. Не выдавай синтетический материал за реальный.
+Единицы выручки и платежей с unit=unknown неизвестны: нельзя приписывать им рубли, тысячи или миллионы.
+OCR может искажать числа: не восстанавливай таблицы и графики по фрагментам; укажи необходимость сверки с PDF.
+Материал банка относится к своей дате, не выдавай исторический прогноз за текущую позицию.
+Свяжи событие, два или более доступных признака и механизм влияния, если данные это позволяют.
+Покажи, как релевантная позиция банка меняет сценарий последствий, и процитируй её в impact/risks/opportunities.
+Если позиция банка не применима, объясни причину в limitations; не добавляй её формально.
 """
 
 
@@ -65,11 +71,13 @@ def demo_insight(event, context, role, evidence, question=None):
                   "Количественные последствия не рассчитаны: условия договоров и экспозиции отсутствуют."]
     if not bank:
         limitations.append("Релевантная аналитика Альфа-Банка в доступных материалах не найдена.")
+    else:
+        limitations.append('В деморежиме показаны найденные фрагменты банка; содержательное сопоставление позиции банка и последствий требует подключения LLM.')
     answer = []
     if question:
         answer = [Claim(text="Демо без LLM не интерпретирует произвольный вопрос. Ниже показаны связанные основания; для содержательного ответа подключите разрешенную модель.", assumption=True)]
     return Insight(headline=event.title,
-        facts=[Claim(text=e["excerpt"], evidence_ids=[e["id"]]) for e in news[:2]],
+        facts=[Claim(text=' '.join(re.split(r'(?<=[.!?])\s+', e['excerpt'])[:2]), evidence_ids=[e["id"]]) for e in news[:1]],
         bank_view=[Claim(text=e["excerpt"], evidence_ids=[e["id"]]) for e in bank[:2]],
         impact=impact, risks=risks, opportunities=opportunities, actions=actions,
         answer=answer, limitations=limitations)
@@ -101,6 +109,11 @@ def validate_insight(insight, evidence, context):
                     issues.append(f"{section}: число отсутствует в цитируемом фрагменте")
     if not insight.impact:
         issues.append("Нет интерпретации влияния на компанию")
+    if insight.bank_view:
+        bank_ids = {ref for claim in insight.bank_view for ref in claim.evidence_ids}
+        applied = any(bank_ids.intersection(claim.evidence_ids) for claim in insight.impact + insight.risks + insight.opportunities)
+        if not applied and not any('банк' in text.lower() for text in insight.limitations):
+            issues.append('Позиция банка не связана с последствиями: покажите механизм влияния либо объясните неприменимость в limitations')
     return list(dict.fromkeys(issues))
 
 
@@ -140,6 +153,7 @@ def run_agent(db, run):
     queries = [q[:500] for q in plan.get("queries", []) if isinstance(q, str)][:3] or [query]
     trace(db, run, "План анализа", {"tools": tools, "queries": queries, "objective": str(plan.get("objective", ""))[:400]})
     evidence = source_evidence
+    rejected_bank_ids = set()
     trace(db, run, "Источники события", {"source_ids": [e["id"] for e in evidence]})
     # Bank search and verification are mandatory, even if the model omits them in its plan.
     for q in queries:
@@ -147,11 +161,13 @@ def run_agent(db, run):
                                          synthetic=event.synthetic, limit=4))
     if not settings().demo_mode and any(e["kind"] == "bank" for e in evidence):
         candidates = list({e["id"]: e for e in evidence if e["kind"] == "bank"}.values())
-        ranked = complete_json(POLICY + '\nУпорядочь банковские фрагменты по релевантности событию и признакам компании. Верни {"ordered_ids": ["ID"]}. Только идентификаторы из candidates, без новых фактов.',
+        ranked = complete_json(POLICY + '\nУпорядочь банковские фрагменты по релевантности событию и признакам компании. Верни {"ordered_ids": ["ID"]}. Включай только релевантные фрагменты из candidates, пустой список допустим. Без новых фактов.',
             {"event": event.title, "role": run.role, "features": context["features"], "candidates": candidates},
             run_id=run.id, extraction=True, max_tokens=400)
         order = [i for i in ranked.get("ordered_ids", []) if isinstance(i, str)]
-        candidates.sort(key=lambda e: order.index(e["id"]) if e["id"] in order else len(order))
+        by_id = {e['id']: e for e in candidates}
+        candidates = [by_id[i] for i in dict.fromkeys(order) if i in by_id]
+        rejected_bank_ids = set(by_id) - {e['id'] for e in candidates}
         evidence = source_evidence + candidates
         trace(db, run, "Переранжирование источников", {"ordered_ids": [e["id"] for e in candidates]})
     if "related_companies" in tools:
@@ -159,7 +175,7 @@ def run_agent(db, run):
                                                 "note": "Платежные связи не определяют характер договоров"})
     issues, insight = [], None
     for attempt in range(3):
-        evidence = list({e["id"]: e for e in evidence}.values())[:16]
+        evidence = list({e["id"]: e for e in evidence if e['id'] not in rejected_bank_ids}.values())[:16]
         trace(db, run, "Поиск аналитики" if attempt == 0 else "Дополнительный поиск", {
             "attempt": attempt, "source_ids": [e["id"] for e in evidence], "reason": issues})
         if settings().demo_mode:
@@ -206,6 +222,8 @@ def run_agent(db, run):
              event.published_at - datetime.fromisoformat(e["published_at"].rstrip("Z")) > timedelta(days=90)]
     if stale:
         insight.limitations.append("Часть аналитики опубликована более 90 дней до события; это историческая позиция, ее актуальность требует проверки.")
+    if any(e.get('extraction') == 'ocr' for e in evidence):
+        insight.limitations.append('Банковские сканы распознаны OCR. Числа и цитаты требуют сверки с оригинальными страницами PDF; графики не интерпретируются.')
     if any(e["synthetic"] for e in evidence):
         insight.limitations.append("Источники помечены как синтетические примеры и не отражают реальную позицию Альфа-Банка.")
     if company.synthetic and not event.synthetic:
