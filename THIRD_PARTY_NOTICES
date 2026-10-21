@@ -1,0 +1,50 @@
+Alfa Context hackathon prototype
+
+This project is not an official Alfa-Bank product. Alfa-Bank naming is used to
+identify the case and demonstrate its required user scenario. No official
+bank interface, proprietary client data or real bank research is bundled.
+
+Main third-party components (licenses must be rechecked when upgrading):
+- Python — Python Software Foundation License
+- FastAPI, Pydantic, SQLAlchemy, Alembic — MIT
+- Uvicorn, Starlette — BSD-3-Clause
+- HTTPX — BSD-3-Clause
+- psycopg — LGPL-3.0; psycopg-binary includes libpq and related components
+- PostgreSQL — PostgreSQL License
+- pypdf — BSD-3-Clause
+- Beautiful Soup — MIT; defusedxml — PSF License
+- python-multipart, python-dotenv — Apache-2.0 / BSD-3-Clause respectively
+- React, React DOM, Vite — MIT
+- TypeScript — Apache-2.0
+- Lucide icons — ISC
+- Playwright — Apache-2.0
+- pytest — MIT
+- nginx — BSD-2-Clause
+- Caddy — Apache-2.0
+- Docker Official Images — individual component and image licenses apply
+- Manrope font — SIL Open Font License 1.1; served by Google Fonts with system-font fallback
+
+Resolved dependencies: backend/requirements.lock, frontend/package-lock.json.
+Package distributions retain their own notices and license files.
+
+LLMs allowed by the case, accessed only through the organizer's external API:
+Gemma 4 26B A4B; GLM-5.3-Flash; Qwen3.6 35B A3B;
+DeepSeek-V4.1-Flash; Qwen3-VL-30B-A3B-Instruct; Kimi-K2.6.
+No model weights are redistributed. Provider terms, model licenses, API IDs
+and tariffs must be verified against organizer-supplied documentation.
+Default live configuration selects Qwen3.6 35B A3B and Gemma 4 26B A4B.
+Demo mode does not call a model.
+
+External sources configured: Bank of Russia public RSS and Vedomosti public
+RSS/open pages. Publisher rights remain with their owners. Access does not
+grant republication rights; retain attribution and follow publisher terms.
+Restricted/paywalled articles are not bypassed.
+
+Synthetic datasets and simulated integrations:
+- Three fictional companies, fabricated payment links, events and analytical
+  examples in app/seed.py and data/demo/. None identify real clients.
+- data/evaluation/events.json: synthetic evaluation scaffold, unreviewed labels.
+- Internet banking UI and logins simulate a corporate bank cabinet.
+- CSVs from the organizer, actual Alfa-Bank research, bank SSO, payment systems,
+  actual model API and an external deployment are not bundled.
+- Lexical retrieval, scoring and demo interpretations are project-owned rules.

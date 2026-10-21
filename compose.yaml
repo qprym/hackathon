@@ -1,0 +1,65 @@
+name: alfa-context
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: alfa
+      POSTGRES_USER: alfa
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-alfa-local}
+    volumes: ["postgres_data:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U alfa -d alfa"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+  migrate:
+    build: ./backend
+    environment: &app-env
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://alfa:alfa-local@db:5432/alfa}
+      DEMO_MODE: ${DEMO_MODE:-true}
+      SEED_DEMO: ${SEED_DEMO:-true}
+      DEMO_PASSWORD: ${DEMO_PASSWORD:-demo-alfa-2026}
+      INLINE_WORKER: "false"
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      AUTO_FETCH_RSS: ${AUTO_FETCH_RSS:-false}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:8080,http://localhost:5173}
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_ANALYSIS_MODEL: ${LLM_ANALYSIS_MODEL:-Qwen3.6 35B A3B}
+      LLM_ANALYSIS_ID: ${LLM_ANALYSIS_ID:-}
+      LLM_EXTRACTION_MODEL: ${LLM_EXTRACTION_MODEL:-Gemma 4 26B A4B}
+      LLM_EXTRACTION_ID: ${LLM_EXTRACTION_ID:-}
+      LLM_INPUT_RUB_PER_MILLION: ${LLM_INPUT_RUB_PER_MILLION:-0}
+      LLM_OUTPUT_RUB_PER_MILLION: ${LLM_OUTPUT_RUB_PER_MILLION:-0}
+      LLM_DAILY_LIMIT_RUB: ${LLM_DAILY_LIMIT_RUB:-450}
+      LLM_BUDGET_TIMEZONE: ${LLM_BUDGET_TIMEZONE:-Europe/Moscow}
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      db: {condition: service_healthy}
+  api:
+    build: ./backend
+    environment: *app-env
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+  worker:
+    build: ./backend
+    environment: *app-env
+    command: ["python", "-m", "app.worker"]
+    depends_on:
+      api: {condition: service_healthy}
+    restart: unless-stopped
+  web:
+    build: ./frontend
+    ports: ["127.0.0.1:8080:80"]
+    depends_on:
+      api: {condition: service_healthy}
+    restart: unless-stopped
+volumes:
+  postgres_data:
