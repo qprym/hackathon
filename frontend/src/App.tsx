@@ -131,6 +131,7 @@ type Run = {
   question: string | null;
   trace: { step: string; at: string; details: unknown }[];
   search_outdated?: boolean;
+  feedback?: { category: string; comment: string } | null;
 };
 type Source = {
   id: string;
@@ -852,6 +853,7 @@ function Analysis({
         const r = await api<Run>("/runs/" + runId);
         if (!active) return;
         setRun(r);
+        setFeedback(r.feedback?.category || "");
         if (r.status === "queued" || r.status === "running")
           timer = setTimeout(poll, 900);
       } catch (e) {
@@ -912,6 +914,7 @@ function Analysis({
     try {
       await post("/insights/" + runId + "/feedback", { category });
       setFeedback(category);
+      setRun(current => current ? { ...current, feedback: { category, comment: "" } } : current);
     } catch (e) {
       setError((e as Error).message);
     }
@@ -947,12 +950,12 @@ function Analysis({
             <span
               className={
                 "pill " +
-                (insight.verification === "checked" ? "green" : "amber")
+                (insight.verification === "checked" && feedback !== "factual_error" ? "green" : "amber")
               }
             >
               <ShieldCheck size={13} />
-              {insight.verification === "checked"
-                ? insight.mode === "demo" ? "Ссылки проверены · демо" : "Основания проверены"
+              {feedback === "factual_error" ? "Есть замечание к разбору" : insight.verification === "checked"
+                ? insight.mode === "demo" ? "Ссылки проверены · демо" : "Автопроверка пройдена"
                 : insight.verification === "insufficient" ? "Проверка не пройдена" : "Ограниченные основания"}
             </span>
           </div>
@@ -989,6 +992,11 @@ function Analysis({
           {run?.search_outdated && <div className="panel">
             <p>Сохранённый разбор выполнен по прежним правилам поиска и проверки. По новым правилам этот ответ ещё не пересчитан.</p>
             <button className="text-button" onClick={() => setTab("sources")}>Посмотреть актуальный подбор банка без AI</button>
+          </div>}
+          {feedback === "factual_error" && <div className="panel" role="note">
+            <strong>Замечание к разбору</strong>
+            <p>{run?.feedback?.comment || "Отмечена возможная ошибка. Вывод требует дополнительной проверки."}</p>
+            <p className="muted small">Исходный ответ модели и результат автопроверки сохранены для сверки.</p>
           </div>}
           <div className="tabs detail-tabs">
             <button
@@ -1042,7 +1050,9 @@ function Analysis({
                     <Claims claims={insight.bank_view} insight={insight} onSource={onSource} />
                   ) : (
                     <p className="muted">{insight.evidence.some((e) => e.kind === "bank")
-                      ? "Материалы банка найдены, но подтверждённый вывод по ним не сформирован. Фрагменты доступны в источниках."
+                      ? insight.evidence.filter(e => e.kind === "bank").every(e => e.relevance?.level === "background")
+                        ? "Прямой оценки этой новости у банка не найдено. Есть только исторический фон смежной отрасли — он не подтверждает последствия для компании. Фрагменты доступны в источниках."
+                        : "Материалы банка найдены, но подтверждённый вывод по ним не сформирован. Фрагменты доступны в источниках."
                       : "Подходящий материал банка не найден. Мнение банка не достраивается."}</p>
                   )}
                   {insight.evidence.filter((e, i, all) => e.kind === "bank"
@@ -1220,6 +1230,8 @@ function Analysis({
                     {e.page && ` · стр. ${e.page}`}
                   </p>
                   {e.coverage === "summary" && <span className="pill amber">Только RSS-аннотация</span>}
+                  {e.kind === "bank" && e.relevance?.level === "background" &&
+                    <p className="muted small">Исторический фон смежной отрасли. Этот фрагмент не подтверждает последствия для компании.</p>}
                   <blockquote>{e.excerpt}</blockquote>
                   <button
                     className="text-button"

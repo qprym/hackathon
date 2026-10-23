@@ -491,6 +491,43 @@
         }
       }
     },
+    "/api/insights/{run_id}/refresh": {
+      "post": {
+        "summary": "Refresh Insight",
+        "operationId": "refresh_insight_api_insights__run_id__refresh_post",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/sources/{source_id}": {
       "get": {
         "summary": "Source",

@@ -157,7 +157,7 @@ def sources_status(user: User = Depends(current_user), db: Session = Depends(get
     return feed_status(db)
 
 
-def create_run(db, user, body, question=None, parent=None):
+def create_run(db, user, body, question=None, parent=None, single_pass=False):
     company = authorize_company(db, user, body.company_id)
     event = db.get(Event, body.event_id)
     if not event:
@@ -182,6 +182,9 @@ def create_run(db, user, body, question=None, parent=None):
         raise HTTPException(429, "Дождитесь завершения текущих анализов")
     run = Run(user_id=user.id, company_id=company.id, event_id=event.id, role=body.role,
               question=question, parent_id=parent, cache_key=key, access_scope=access_scope)
+    if single_pass:
+        run.trace = [{'step': 'Режим пересчёта', 'at': utcnow().isoformat() + 'Z', 'details': {'max_attempts': 1,
+            'note': 'Свежий поиск, один синтез и независимая проверка; максимум два обращения без платных повторов.'}}]
     db.add(run)
     db.commit()
     return {"run_id": run.id, "cached": False}
@@ -204,12 +207,14 @@ def authorized_run(db, user, run_id):
 @app.get("/api/runs/{run_id}")
 def get_run(run_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
     run = authorized_run(db, user, run_id)
+    rating = db.scalar(select(Feedback).where(Feedback.run_id == run_id, Feedback.user_id == user.id))
     # Trace available to reviewers but cannot expose IDs of inaccessible related companies.
     steps = [{**s, "details": {k: v for k, v in s["details"].items() if k != "counterparties"}} for s in run.trace]
     return {"id": run.id, "status": run.status, "stage": run.stage, "trace": steps,
             "result": run.result, "error": run.error, "question": run.question, "role": run.role,
             "company_id": run.company_id, "event_id": run.event_id,
             "event_title": db.get(Event, run.event_id).title,
+            "feedback": {'category': rating.category, 'comment': rating.comment} if rating else None,
             "search_outdated": bool(run.result and run.result.get('search_version') != SEARCH_VERSION)}
 
 
@@ -253,6 +258,18 @@ def retry_insight(run_id: str, user: User = Depends(current_user), db: Session =
     if not settings().demo_mode and allowance_status(db)['requests_remaining'] < 4:
         raise HTTPException(429, 'Для исправления с корректирующим циклом нужны четыре оставшихся обращения. Общий лимит не увеличен.')
     return create_run(db, user, Analyze(company_id=run.company_id, event_id=run.event_id, role=run.role), parent=run.id)
+
+
+@app.post('/api/insights/{run_id}/refresh', status_code=202)
+def refresh_insight(run_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    run = authorized_run(db, user, run_id)
+    if (run.status != 'completed' or (run.result or {}).get('verification') != 'checked'
+            or run.result.get('search_version') == SEARCH_VERSION):
+        raise HTTPException(409, 'Пересчёт доступен для проверенного разбора с прежней версией поиска')
+    if not settings().demo_mode and allowance_status(db)['requests_remaining'] < 2:
+        raise HTTPException(429, 'Для пересчёта и независимой проверки нужны два оставшихся обращения.')
+    return create_run(db, user, Analyze(company_id=run.company_id, event_id=run.event_id, role=run.role),
+                      parent=run.id, single_pass=True)
 
 
 @app.get("/api/sources/{source_id}")

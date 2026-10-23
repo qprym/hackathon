@@ -5,7 +5,7 @@ from pydantic import ValidationError
 from .config import settings
 from .context import company_context
 from .db import utcnow
-from .llm import complete_json
+from .llm import ModelUnavailable, complete_json
 from .models import Company, Event, Run, User
 from .retrieval import TOPICS, TOPIC_NAMES, event_evidence, rank_event, search_documents
 from .schemas import Claim, Insight, InsightPatch
@@ -114,6 +114,9 @@ def run_agent(db, run):
         "feature_keys": list(context["features"]), "missing": context["missing"]})
     previous = None
     repair = bool(run.parent_id and not run.question)
+    single_pass = repair and any(s['step'] == 'Режим пересчёта' for s in run.trace)
+    if single_pass and run.attempts > 1 and not settings().demo_mode:
+        raise ModelUnavailable('Пересчёт прерван. Автоматический платный повтор отключён, чтобы сохранить лимит двух обращений.')
     if run.parent_id:
         parent = db.get(Run, run.parent_id)
         if not parent or parent.user_id != run.user_id or parent.company_id != run.company_id or parent.event_id != run.event_id:
@@ -141,7 +144,7 @@ def run_agent(db, run):
         query += " " + run.question
     if settings().demo_mode or repair:
         plan = {"tools": ["event_sources", "bank_search", "related_companies", "verify"], "queries": [query],
-                "objective": "Повторно найти основания и исправить отклонённый разбор без платного повторения предварительных этапов" if repair else "Проверить связь события с продуктами, отраслью и платежными связями"}
+                "objective": "Повторно найти основания и составить свежий разбор без платного повторения предварительных этапов" if repair else "Проверить связь события с продуктами, отраслью и платежными связями"}
     else:
         plan = complete_json(POLICY + '\nСоставь план. JSON: {"tools": ["event_sources", "bank_search", "related_companies", "verify"], "queries": ["поисковый запрос"], "objective": "краткая цель"}. Выбери нужные инструменты из этого списка и до трех запросов. Дата события — event_date: не подставляй год из памяти.',
             {"context": context, "event": event.title, "event_date": event.published_at.isoformat(),
@@ -176,12 +179,12 @@ def run_agent(db, run):
     if "related_companies" in tools:
         trace(db, run, "Связанные компании", {"counterparties": context["counterparties"],
                                                 "note": "Платежные связи не определяют характер договоров"})
-    issues = ['Предыдущий результат отклонён. Составьте новый вывод только по текущим context и evidence; не восстанавливайте прошлые значения или ссылки.'] if repair else []
+    issues = ['Составьте новый вывод только по текущим context и evidence; не восстанавливайте прошлые значения или ссылки.'] if repair else []
     insight = None
     model_insight = None
     correction_targets = None
     review_feedback = []
-    max_attempts = 2 if repair else 3
+    max_attempts = 1 if single_pass else 2 if repair else 3
     for attempt in range(max_attempts):
         evidence = list({e["id"]: e for e in evidence if e['id'] not in rejected_bank_ids}.values())[:16]
         trace(db, run, "Поиск аналитики" if attempt == 0 else "Дополнительный поиск", {
