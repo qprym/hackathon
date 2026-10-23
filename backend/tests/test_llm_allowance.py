@@ -65,7 +65,7 @@ def test_authorized_extension_preserves_first_twenty_and_stops_at_forty(gateway,
     assert llm.allowance_status(db)['requests_remaining'] == 0
 
 
-@pytest.mark.parametrize('used,limit', [(39, 59), (56, 61)])
+@pytest.mark.parametrize('used,limit', [(39, 59), (56, 61), (60, 62)])
 def test_authorized_extension_stops_at_new_total_under_concurrency(gateway, db, monkeypatch, used, limit):
     db.add(LlmAllowance(key=llm.ALLOWANCE_KEY, requests=used, spent=0.1))
     db.commit()
