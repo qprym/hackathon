@@ -65,10 +65,11 @@ def test_authorized_extension_preserves_first_twenty_and_stops_at_forty(gateway,
     assert llm.allowance_status(db)['requests_remaining'] == 0
 
 
-def test_new_extension_allows_only_twenty_more_after_thirty_nine(gateway, db, monkeypatch):
-    db.add(LlmAllowance(key=llm.ALLOWANCE_KEY, requests=39, spent=0.1))
+@pytest.mark.parametrize('used,limit', [(39, 59), (56, 61)])
+def test_authorized_extension_stops_at_new_total_under_concurrency(gateway, db, monkeypatch, used, limit):
+    db.add(LlmAllowance(key=llm.ALLOWANCE_KEY, requests=used, spent=0.1))
     db.commit()
-    monkeypatch.setattr(settings(), 'llm_request_limit', 59)
+    monkeypatch.setattr(settings(), 'llm_request_limit', limit)
     def attempt(index):
         try:
             llm.complete_json('test', {'i': index}, max_tokens=8)
@@ -76,10 +77,10 @@ def test_new_extension_allows_only_twenty_more_after_thirty_nine(gateway, db, mo
         except llm.BudgetExceeded:
             return False
     with ThreadPoolExecutor(max_workers=8) as pool:
-        assert sum(pool.map(attempt, range(30))) == 20
-    assert len(gateway) == 20
+        assert sum(pool.map(attempt, range(30))) == limit - used
+    assert len(gateway) == limit - used
     db.expire_all()
-    assert llm.allowance_status(db)['requests_used'] == 59
+    assert llm.allowance_status(db)['requests_used'] == limit
     assert llm.allowance_status(db)['requests_remaining'] == 0
 
 

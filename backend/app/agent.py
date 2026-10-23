@@ -250,7 +250,7 @@ def run_agent(db, run):
             if review_feedback:
                 packet['previous_review_errors'] = review_feedback
             trace(db, run, 'Пакет проверки', {'attempt': attempt, 'protocol': packet['protocol'], 'payload': packet})
-            review_raw = complete_json(REVIEW_POLICY, packet, run_id=run.id, max_tokens=6000, reasoning=True)
+            review_raw = complete_json(REVIEW_POLICY, packet, run_id=run.id, max_tokens=8000, reasoning=True)
             issues, correction_targets, search_queries = assess_review(review_raw, packet)
             review_feedback = issues if not correction_targets else []
             queries = search_queries or queries
