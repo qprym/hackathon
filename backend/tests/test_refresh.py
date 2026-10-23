@@ -95,3 +95,18 @@ def test_feedback_remains_visible_without_rewriting_model_result(client, db):
     with TestClient(app, headers={'X-Alfa-Request': '1'}) as viewer:
         viewer.post('/api/auth/login', json={'username': 'viewer', 'password': 'demo-alfa-2026'})
         assert viewer.get(f'/api/runs/{run_id}').status_code == 404
+
+
+def test_new_validation_version_invalidates_cache_and_allows_bounded_refresh(client, db):
+    parent_id, body = old_checked_run(client, db)
+    parent = db.get(Run, parent_id)
+    parent.result = {**parent.result, 'search_version': SEARCH_VERSION, 'validation_version': 'old-validation'}
+    parent.cache_key = 'prior-prompt-and-validation-version'
+    db.commit()
+    before = client.get(f'/api/runs/{parent_id}').json()
+    assert before['validation_outdated'] and not before['search_outdated']
+    response = client.post(f'/api/insights/{parent_id}/refresh')
+    assert response.status_code == 202 and response.json()['run_id'] != parent_id
+    child = db.get(Run, response.json()['run_id'])
+    assert child.parent_id == parent_id and child.trace[0]['step'] == 'Режим пересчёта'
+    assert client.get(f'/api/runs/{parent_id}').json()['result'] == before['result']

@@ -131,6 +131,7 @@ type Run = {
   question: string | null;
   trace: { step: string; at: string; details: unknown }[];
   search_outdated?: boolean;
+  validation_outdated?: boolean;
   feedback?: { category: string; comment: string } | null;
 };
 type Source = {
@@ -998,6 +999,7 @@ function Analysis({
             <p>{run?.feedback?.comment || "Отмечена возможная ошибка. Вывод требует дополнительной проверки."}</p>
             <p className="muted small">Исходный ответ модели и результат автопроверки сохранены для сверки.</p>
           </div>}
+          {run?.validation_outdated && <p className="muted">Сохранённый ответ получен до обновления правил проверки финансовых выводов. Новый разбор моделью ещё не выполнялся.</p>}
           <div className="tabs detail-tabs">
             <button
               className={tab === "analysis" ? "active" : ""}

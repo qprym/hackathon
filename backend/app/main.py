@@ -23,6 +23,7 @@ from .seed import seed
 from .worker import work_loop
 from .feeds import feed_status, refresh_feed
 from .llm import allowance_status
+from .cashflow import VALIDATION_VERSION
 
 
 @asynccontextmanager
@@ -171,7 +172,7 @@ def create_run(db, user, body, question=None, parent=None, single_pass=False):
     access_scope = sorted(set(user.company_ids))
     key = hashlib.sha256(json.dumps([user.id, access_scope, body.model_dump(), company.features, str(company.updated_at),
         [list(d) for d in documents], context_version, question, parent if question else None, settings().demo_mode,
-        settings().llm_analysis_id, settings().llm_extraction_id, "prompt-v16", SEARCH_VERSION], sort_keys=True, default=str).encode()).hexdigest()
+        settings().llm_analysis_id, settings().llm_extraction_id, "prompt-v17", SEARCH_VERSION, VALIDATION_VERSION], sort_keys=True, default=str).encode()).hexdigest()
     existing = db.scalar(select(Run).where(Run.cache_key == key, Run.status.in_(["queued", "running", "completed"])).order_by(Run.created_at.desc()))
     if existing and not (parent and not question and existing.status == 'completed' and (existing.result or {}).get('verification') == 'insufficient'):
         return {"run_id": existing.id, "cached": existing.status == "completed"}
@@ -215,6 +216,7 @@ def get_run(run_id: str, user: User = Depends(current_user), db: Session = Depen
             "company_id": run.company_id, "event_id": run.event_id,
             "event_title": db.get(Event, run.event_id).title,
             "feedback": {'category': rating.category, 'comment': rating.comment} if rating else None,
+            "validation_outdated": bool(run.result and run.result.get('validation_version') != VALIDATION_VERSION),
             "search_outdated": bool(run.result and run.result.get('search_version') != SEARCH_VERSION)}
 
 
@@ -264,8 +266,8 @@ def retry_insight(run_id: str, user: User = Depends(current_user), db: Session =
 def refresh_insight(run_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
     run = authorized_run(db, user, run_id)
     if (run.status != 'completed' or (run.result or {}).get('verification') != 'checked'
-            or run.result.get('search_version') == SEARCH_VERSION):
-        raise HTTPException(409, 'Пересчёт доступен для проверенного разбора с прежней версией поиска')
+            or (run.result.get('search_version') == SEARCH_VERSION and run.result.get('validation_version') == VALIDATION_VERSION)):
+        raise HTTPException(409, 'Пересчёт доступен для проверенного разбора с прежней версией поиска или проверки')
     if not settings().demo_mode and allowance_status(db)['requests_remaining'] < 2:
         raise HTTPException(429, 'Для пересчёта и независимой проверки нужны два оставшихся обращения.')
     return create_run(db, user, Analyze(company_id=run.company_id, event_id=run.event_id, role=run.role),

@@ -2,6 +2,7 @@
 import re
 from datetime import datetime
 from decimal import Decimal
+from .cashflow import cashflow_issues
 
 def numeric_values(text):
     # Compare full numeric values, never substrings (10 is not confirmed by 100).
@@ -88,6 +89,8 @@ def validate_insight(insight, evidence, context, event_source_ids=None):
     for section in ("facts", "bank_view", "impact", "risks", "opportunities", "actions", "answer"):
         for index, claim in enumerate(getattr(insight, section)):
             item_id = f'{section}.{index}'
+            if section in ('impact', 'risks', 'opportunities', 'actions', 'answer'):
+                issues.extend(f'{item_id}: {issue}' for issue in cashflow_issues(claim.text))
             if any(ref not in known for ref in claim.evidence_ids):
                 issues.append(f"{item_id}: неизвестная ссылка на источник")
             if any(key not in context["features"] for key in claim.feature_keys):

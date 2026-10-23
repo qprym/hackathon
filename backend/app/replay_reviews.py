@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 from .schemas import Insight
 from .validation import validate_insight
+from .cashflow import VALIDATION_VERSION, financial_findings
+from .review import assess_review, review_items
 
 
 def replay(directory, annotations=()):
@@ -26,10 +28,23 @@ def replay(directory, annotations=()):
                 attempts.setdefault(detail['attempt'], {})['draft'] = detail['draft']
             elif step['step'] == 'Проверка оснований':
                 attempts.setdefault(detail['attempt'], {})['review'] = detail
+            elif step['step'] == 'Пакет проверки':
+                attempts.setdefault(detail['attempt'], {})['review_packet'] = detail['payload']
+            elif step['step'] == 'Ответ проверяющего':
+                attempts.setdefault(detail['attempt'], {})['review_response'] = detail['response']
         for attempt, saved in attempts.items():
             if 'draft' not in saved:
                 continue
             counts['drafts'] += 1
+            financial = financial_findings(review_items(Insight.model_validate(saved['draft'])))
+            if financial:
+                counts['cashflow_flagged_drafts'] += 1
+            reviewed = None
+            if 'review_packet' in saved and 'review_response' in saved:
+                current_issues, targets, _ = assess_review(saved['review_response'], saved['review_packet'])
+                reviewed = {'issues': current_issues, 'correction_targets': targets,
+                            'snapshot': 'exact_saved_review_packet_and_response'}
+                counts['saved_reviews_replayed'] += 1
             evidence_ids = saved.get('source_ids', [])
             available = bool(evidence_ids and context['features']) and all(ref in sources for ref in evidence_ids)
             # Old runs did not save request packets. Never borrow evidence/context from another run.
@@ -49,8 +64,10 @@ def replay(directory, annotations=()):
             records.append({'run_id': run['id'], 'attempt': attempt, 'saved_status': run['status'],
                 'snapshot': 'reconstructed_from_same_run_result' if available else 'missing',
                 'local_issues_now': local_issues, 'original_issues': issues,
+                'cashflow_issues_now': financial, 'saved_review_replay': reviewed,
                 'semantic_status': 'not_rechecked', 'published': False})
-    return {'paid_calls': 0, 'method': 'local validation plus explicitly curated review annotations; no model verdict',
+    return {'paid_calls': 0, 'validation_version': VALIDATION_VERSION,
+            'method': 'local validation, saved review protocol replay and curated annotations; no new model verdict',
             'counts': dict(counts), 'records': records}
 
 

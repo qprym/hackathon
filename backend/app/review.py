@@ -3,6 +3,7 @@ from collections import Counter
 from textwrap import wrap
 from pydantic import ValidationError
 from .schemas import Claim, EvidenceQuote, InsightPatch, Review
+from .cashflow import FINANCIAL_LOGIC, financial_findings
 
 SECTIONS = ('facts', 'bank_view', 'impact', 'risks', 'opportunities', 'actions', 'answer')
 
@@ -37,7 +38,7 @@ OCR проверяй для чисел, которые действительн�
 Редакционные пожелания (убрать правдивое ограничение, сократить текст, удалить лишнюю, но не ложную ссылку) — только editorial_notes и не повод объявлять утверждение ложным.
 Правдивое предупреждение об отсутствии единиц или о возрасте найденных материалов допустимо, даже если фактор не использован в сценарии.
 Не пропускай разделы, не ограничивай проверку тремя замечаниями, не генерируй новый анализ.
-"""
+""" + '\n' + FINANCIAL_LOGIC
 
 
 def review_items(insight):
@@ -77,6 +78,7 @@ def review_packet(insight, evidence, context, *, event_title, event_date, questi
         'company_grounds': {item_id: {key: context['features'][key] for key in item.get('feature_keys', [])
                                    if key in context['features']} for item_id, item in items.items()},
         'company_limitations': context.get('missing', []) + context.get('limitations', []),
+        'financial_logic_findings': financial_findings(items),
         'output_schema': schema,
         'protocol': 'claim-review-v2' if quote_catalog else 'claim-review-v1',
     }
@@ -144,7 +146,11 @@ def assess_review(raw, packet):
     if protocol:
         # Do not modify the draft based on an invalid reviewer response; retry review only.
         return list(dict.fromkeys(protocol)), [], review.search_queries
-    return issues, targets, review.search_queries
+    # A plausible model verdict cannot override a known invalid financial implication.
+    for item_id, findings in financial_findings(items).items():
+        issues.extend(f'{item_id}: {finding}' for finding in findings)
+        targets.append(item_id)
+    return list(dict.fromkeys(issues)), list(dict.fromkeys(targets)), review.search_queries
 
 
 def apply_patch_to_insight(insight, raw, targets):
