@@ -94,6 +94,7 @@ type Evidence = {
   page: number | null;
   synthetic: boolean;
   coverage?: string;
+  relevance?: { level: "direct" | "background"; reason: string };
 };
 type Claim = {
   text: string;
@@ -129,6 +130,7 @@ type Run = {
   error: string | null;
   question: string | null;
   trace: { step: string; at: string; details: unknown }[];
+  search_outdated?: boolean;
 };
 type Source = {
   id: string;
@@ -789,6 +791,35 @@ function Claims({
   );
 }
 
+function BankSearchPreview({ runId, onSource }: { runId: string; onSource: (id: string) => void }) {
+  const [result, setResult] = useState<{ sources: Evidence[]; has_direct: boolean } | null>(null);
+  const [loading, setLoading] = useState(false), [error, setError] = useState("");
+  async function refresh() {
+    setLoading(true); setError("");
+    try { setResult(await api<{ sources: Evidence[]; has_direct: boolean }>(`/runs/${runId}/bank-research`)); }
+    catch (e) { setError((e as Error).message); }
+    finally { setLoading(false); }
+  }
+  return <section className="panel bank-search-preview">
+    <h3>Актуальный подбор аналитики банка</h3>
+    <p className="muted">Поиск по сохранённым документам без обращения к AI. Текст прежнего разбора не изменяется.</p>
+    <button className="text-button" disabled={loading} onClick={refresh}>{loading ? "Ищем материалы…" : "Проверить подбор аналитики"}</button>
+    {error && <ErrorBox error={error} />}
+    {result && <>
+      <p>{result.has_direct ? "Найдены материалы по предмету новости. Применимость выводов требует проверки." : result.sources.length
+        ? "Прямой оценки предмета новости нет. Найден только фон смежной отрасли; он не доказывает последствия для компании."
+        : "В доступных документах нет применимой аналитики по предмету новости."}</p>
+      {result.sources.map(e => <div className="bank-publication" key={e.id}>
+        <span className="pill">{e.relevance?.level === "background" ? "Исторический фон" : "По предмету новости"}</span>
+        <h4>{e.title}</h4><p className="muted small">{date(e.published_at)}{e.page && ` · стр. ${e.page}`}</p>
+        <p className="muted small">{e.relevance?.reason}</p>
+        <details className="bank-excerpt"><summary>Фрагмент из материала</summary><blockquote>{e.excerpt}</blockquote></details>
+        <button className="text-button" onClick={() => onSource(e.document_id)}>Открыть материал <ArrowUpRight size={15}/></button>
+      </div>)}
+    </>}
+  </section>;
+}
+
 function Analysis({
   runId,
   onBack,
@@ -955,6 +986,10 @@ function Analysis({
       )}{" "}
       {insight && (
         <>
+          {run?.search_outdated && <div className="panel">
+            <p>Сохранённый разбор выполнен по прежним правилам поиска и проверки. По новым правилам этот ответ ещё не пересчитан.</p>
+            <button className="text-button" onClick={() => setTab("sources")}>Посмотреть актуальный подбор банка без AI</button>
+          </div>}
           <div className="tabs detail-tabs">
             <button
               className={tab === "analysis" ? "active" : ""}
@@ -1000,6 +1035,9 @@ function Analysis({
                   <p className="authorship-description">{insight.evidence.some((e) => e.kind === "bank" && e.synthetic)
                     ? "Синтетический пример, не реальное мнение экспертов."
                     : "Краткий пересказ AI опубликованной аналитики банка. Мнение относится к дате материала."}</p>
+                  {insight.bank_view.length > 0 && insight.bank_view.every(claim => claim.evidence_ids.every(id =>
+                    insight.evidence.find(e => e.id === id)?.relevance?.level === "background")) &&
+                    <p className="pill amber">Исторический фон смежной отрасли. Прямой оценки события и последствий для компании нет.</p>}
                   {insight.bank_view.length ? (
                     <Claims claims={insight.bank_view} insight={insight} onSource={onSource} />
                   ) : (
@@ -1164,6 +1202,11 @@ function Analysis({
             </div>
           )}
           {tab === "sources" && (
+            <>
+            <BankSearchPreview key={runId} runId={runId} onSource={onSource}/>
+            {run?.search_outdated && <p className="muted">Ниже — источники сохранённого разбора, подобранные по прежним правилам. Они оставлены для проверки истории.</p>}
+            <details open={!run?.search_outdated}>
+            <summary>Источники сохранённого разбора · {new Set(insight.evidence.map(e => e.document_id)).size}</summary>
             <div className="sources-grid">
               {insight.evidence.filter((e, i, all) => all.findIndex((item) => item.document_id === e.document_id) === i).map((e, i) => (
                 <div className="panel source-card" key={e.id}>
@@ -1187,6 +1230,8 @@ function Analysis({
                 </div>
               ))}
             </div>
+            </details>
+            </>
           )}
           {tab === "trace" && (
             <div className="panel trace-panel">

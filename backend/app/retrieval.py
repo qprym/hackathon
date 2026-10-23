@@ -3,12 +3,13 @@ from datetime import timedelta
 from sqlalchemy import func, select
 from .db import utcnow
 from .models import Document, Event
+from .bank_relevance import SEARCH_VERSION, subject_match, words
 
 TOPICS = {
     "rates": ("ставк", "кредит", "процент", "рефинанс", "денежно-кредит"),
     "fx": ("валют", "курс", "импорт", "экспорт", "трансгранич", "внешней торгов"),
     "logistics": ("логист", "перевоз", "поставк", "порт", "транспорт", "груз"),
-    "commodities": ("сырь", "металл", "нефт", "золот", "сталь", "энергоресурс"),
+    "commodities": ("сырь", "металл", "нефт", "золот", "сталь", "энергоресурс", "дизел", "бензин", "топлив"),
     "demand": ("спрос", "потреблен", "рознич", "продаж", "торговл"),
     "regulation": ("регулир", "закон", "налог", "тариф", "пошлин", "отчетност"),
     "labor": ("труд", "зарплат", "кадр", "персонал", "работник"),
@@ -78,7 +79,7 @@ def rank_event(event, context, role):
             "feature_keys": list(dict.fromkeys(keys))}
 
 
-def search_documents(db, query, kind=None, before=None, synthetic=False, limit=6):
+def search_documents(db, query, kind=None, before=None, synthetic=False, limit=6, focus=None):
     stmt = select(Document).where(Document.synthetic == synthetic)
     if kind:
         stmt = stmt.where(Document.kind == kind)
@@ -86,6 +87,7 @@ def search_documents(db, query, kind=None, before=None, synthetic=False, limit=6
         stmt = stmt.where(Document.published_at <= before)
     query_tokens = tokens(query)
     query_topics = set(classify(query))
+    focus = focus or query
     # PostgreSQL supplies indexed linguistic search; lexical/topic matching broadens recall.
     candidates = []
     if db.bind.dialect.name == "postgresql" and query.strip():
@@ -110,27 +112,45 @@ def search_documents(db, query, kind=None, before=None, synthetic=False, limit=6
                     continue
                 if sum(c.isdigit() for c in body) / max(len(body), 1) > .16:
                     continue
+            relevance = None
+            if kind == 'bank':
+                relevance = subject_match(focus, chunk['text'])
+                if relevance and relevance['level'] == 'irrelevant':
+                    continue
+                if relevance is None:
+                    # Broad themes and speech boilerplate cannot admit a document.
+                    anchors = words(focus) & words(chunk['text'])
+                    title_anchors = words(focus) & words(doc.title)
+                    if len(anchors) < 2 and not (anchors and title_anchors):
+                        continue
+                    relevance = {'level': 'direct', 'matched_terms': sorted(anchors),
+                                 'reason': 'Совпадают предметные слова; это поисковая связь, не доказательство вывода.'}
             overlap = len(query_tokens & tokens(chunk["text"]))
             topic_match = len(query_topics & set(classify(chunk['text'])))
-            if not overlap:
+            if not overlap and not relevance:
                 continue
-            if query_topics and not topic_match and overlap < 3:
+            if not relevance and query_topics and not topic_match and overlap < 3:
                 continue
-            if not query_topics and overlap < 2:
+            if not relevance and not query_topics and overlap < 2:
                 continue
             title_match = len(query_tokens & tokens(doc.title))
             score = overlap + topic_match * 3 + title_match * 2
             score += len(query_topics & set(classify(doc.title))) * 2
+            if relevance:
+                score += 100 if relevance['level'] == 'direct' else 20
             if before:
                 score -= min(max((before - doc.published_at).days - 90, 0) / 365, 5)
             if score:
-                scored.append((score, doc, index, chunk))
-    scored.sort(key=lambda row: (row[0], row[1].published_at), reverse=True)
+                scored.append((score, doc, index, chunk, relevance))
+    scored.sort(key=lambda row: (bool(row[4] and row[4]['level'] == 'direct'), row[0], row[1].published_at), reverse=True)
     result, counts = [], {}
-    for _, doc, index, chunk in scored:
+    for _, doc, index, chunk, relevance in scored:
         if kind == 'bank' and counts.get(doc.id, 0) >= 2:
             continue
-        result.append(evidence(doc, index, chunk))
+        item = evidence(doc, index, chunk)
+        if relevance:
+            item['relevance'] = {**relevance, 'focus': focus, 'version': SEARCH_VERSION}
+        result.append(item)
         counts[doc.id] = counts.get(doc.id, 0) + 1
         if len(result) >= limit:
             break

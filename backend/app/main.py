@@ -16,7 +16,8 @@ from .context import company_context
 from .db import SessionLocal, engine, get_db, initialize_development_schema, utcnow
 from .ingestion import FEEDS, extract_pdf, import_csv, import_document
 from .models import Audit, AuthSession, Budget, Company, Document, Event, Feedback, Link, Run, Usage, User
-from .retrieval import TOPIC_NAMES, rank_event
+from .retrieval import TOPIC_NAMES, rank_event, search_documents
+from .bank_relevance import SEARCH_VERSION
 from .schemas import Analyze, FeedbackInput, Login, NewsInput, Question, Role
 from .seed import seed
 from .worker import work_loop
@@ -170,7 +171,7 @@ def create_run(db, user, body, question=None, parent=None):
     access_scope = sorted(set(user.company_ids))
     key = hashlib.sha256(json.dumps([user.id, access_scope, body.model_dump(), company.features, str(company.updated_at),
         [list(d) for d in documents], context_version, question, parent if question else None, settings().demo_mode,
-        settings().llm_analysis_id, settings().llm_extraction_id, "prompt-v15"], sort_keys=True, default=str).encode()).hexdigest()
+        settings().llm_analysis_id, settings().llm_extraction_id, "prompt-v16", SEARCH_VERSION], sort_keys=True, default=str).encode()).hexdigest()
     existing = db.scalar(select(Run).where(Run.cache_key == key, Run.status.in_(["queued", "running", "completed"])).order_by(Run.created_at.desc()))
     if existing and not (parent and not question and existing.status == 'completed' and (existing.result or {}).get('verification') == 'insufficient'):
         return {"run_id": existing.id, "cached": existing.status == "completed"}
@@ -208,7 +209,18 @@ def get_run(run_id: str, user: User = Depends(current_user), db: Session = Depen
     return {"id": run.id, "status": run.status, "stage": run.stage, "trace": steps,
             "result": run.result, "error": run.error, "question": run.question, "role": run.role,
             "company_id": run.company_id, "event_id": run.event_id,
-            "event_title": db.get(Event, run.event_id).title}
+            "event_title": db.get(Event, run.event_id).title,
+            "search_outdated": bool(run.result and run.result.get('search_version') != SEARCH_VERSION)}
+
+
+@app.get('/api/runs/{run_id}/bank-research')
+def current_bank_research(run_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    run = authorized_run(db, user, run_id)
+    event = db.get(Event, run.event_id)
+    sources = search_documents(db, event.title, kind='bank', before=event.published_at,
+                               synthetic=event.synthetic, limit=6, focus=event.title)
+    return {'search_version': SEARCH_VERSION, 'sources': sources,
+            'has_direct': any(e['relevance']['level'] == 'direct' for e in sources)}
 
 
 @app.post("/api/insights/{run_id}/questions", status_code=202)

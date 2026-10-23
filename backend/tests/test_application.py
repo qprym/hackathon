@@ -147,7 +147,9 @@ def test_missing_bank_triggers_research_and_explicit_limitation(client, db):
     run_id = start(client)
     process_one()
     result = client.get('/api/runs/'+run_id).json()
-    assert any(s['step']=='Дополнительный поиск' for s in result['trace'])
+    steps = [s['step'] for s in result['trace']]
+    assert 'Повторный поиск аналитики' in steps
+    assert steps.index('Повторный поиск аналитики') < steps.index('Проверка оснований')
     assert not result['result']['bank_view']
     assert any('не найдена' in l for l in result['result']['limitations'])
 

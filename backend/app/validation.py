@@ -102,7 +102,12 @@ def validate_insight(insight, evidence, context, event_source_ids=None):
                 issues.append(f'{item_id}: факты события должны ссылаться на исходные новости этого события')
             if section == "bank_view" and (not claim.evidence_ids or any(known.get(ref, {}).get("kind") != "bank" for ref in claim.evidence_ids)):
                 issues.append(f"{item_id}: Позиция банка должна опираться только на банковские материалы")
-            if section in ("facts", "bank_view") and not claim.assumption:
+            if any(known.get(ref, {}).get('relevance', {}).get('level') == 'irrelevant' for ref in claim.evidence_ids):
+                issues.append(f'{item_id}: источник не связан с предметом события')
+            if (section in ('impact', 'risks', 'opportunities', 'actions') or section == 'answer' and claim.assumption) and any(
+                known.get(ref, {}).get('relevance', {}).get('level') == 'background' for ref in claim.evidence_ids):
+                issues.append(f'{item_id}: фоновая аналитика смежной отрасли не подтверждает персональное последствие или рекомендацию; нужны применимые основания')
+            if section in ("facts", "bank_view", "answer") and not claim.assumption:
                 source_text = " ".join(known.get(ref, {}).get("excerpt", "") for ref in claim.evidence_ids)
                 source_numbers, source_dates = dated_numbers(source_text)
                 for ref in claim.evidence_ids:
@@ -113,7 +118,7 @@ def validate_insight(insight, evidence, context, event_source_ids=None):
                             source_dates.add(published.date().isoformat())
                         except ValueError:
                             pass
-                if section == 'facts':
+                if section in ('facts', 'answer'):
                     source_numbers |= numeric_values(' '.join(str(context['features'].get(key, {}).get('value', '')) for key in claim.feature_keys))
                 numbers, dates = dated_numbers(claim.text)
                 source_dates |= {part for date in list(source_dates) for part in (date[:4], date[:7])}
@@ -123,9 +128,10 @@ def validate_insight(insight, evidence, context, event_source_ids=None):
                     issues.append(f'{item_id}: дата отсутствует в цитируемом фрагменте и метаданных')
     if not insight.impact:
         issues.append("Нет интерпретации влияния на компанию")
-    if insight.bank_view:
-        bank_ids = {ref for claim in insight.bank_view for ref in claim.evidence_ids}
-        applied = any(bank_ids.intersection(claim.evidence_ids) for claim in insight.impact + insight.risks + insight.opportunities)
-        if not applied and not any('банк' in text.lower() for text in insight.limitations):
-            issues.append('bank_view.0: Позиция банка не связана с последствиями: покажите механизм влияния либо объясните неприменимость в limitations')
+    for index, claim in enumerate(insight.bank_view):
+        direct_ids = {ref for ref in claim.evidence_ids
+                      if known.get(ref, {}).get('relevance', {}).get('level') not in ('background', 'irrelevant')}
+        applied = any(direct_ids.intersection(c.evidence_ids) for c in insight.impact + insight.risks + insight.opportunities)
+        if direct_ids and not applied:
+            issues.append(f'bank_view.{index}: прямая позиция банка не связана с последствиями; покажите подтверждённый механизм в impact/risks/opportunities либо исключите неприменимый тезис')
     return list(dict.fromkeys(issues))

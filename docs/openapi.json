@@ -1,7 +1,7 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "\u0410\u043b\u044c\u0444\u0430 \u00b7 \u041a\u043e\u043d\u0442\u0435\u043a\u0441\u0442",
+    "title": "Альфа · Контекст",
     "version": "0.1.0"
   },
   "paths": {
@@ -290,6 +290,43 @@
       "get": {
         "summary": "Get Run",
         "operationId": "get_run_api_runs__run_id__get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/runs/{run_id}/bank-research": {
+      "get": {
+        "summary": "Current Bank Research",
+        "operationId": "current_bank_research_api_runs__run_id__bank_research_get",
         "parameters": [
           {
             "name": "run_id",

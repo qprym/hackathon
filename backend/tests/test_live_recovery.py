@@ -200,3 +200,53 @@ def test_one_remaining_request_does_not_start_incomplete_live_analysis(client, d
     event = db.scalar(select(Event).where(Event.title.like('Ставка%')))
     assert client.post('/api/analyses', json={'company_id':'demo-metal', 'event_id':event.id, 'role':'CFO'}).status_code == 429
     assert not db.scalars(select(Run)).all()
+
+
+def test_missing_bank_research_is_explicit_and_does_not_waste_paid_retries(client, db, monkeypatch):
+    from sqlalchemy import delete
+    from app import agent
+    from app.models import Document
+    parent_id, _ = rejected_run(client, db)
+    db.execute(delete(Document).where(Document.kind == 'bank')); db.commit()
+    calls = []
+    def fake(system, payload, **kwargs):
+        calls.append(payload)
+        if 'Проверь, подтверждаются' in system:
+            return accepted_review(payload)
+        assert not any(e['kind'] == 'bank' for e in payload['evidence'])
+        return {'headline':payload['event'], 'impact':[{'text':'Если предстоит погашение, проверить договор.',
+            'feature_keys':['CL_PRODUCT_LOA_MARK'], 'assumption':True}]}
+    monkeypatch.setattr(settings(), 'demo_mode', False)
+    monkeypatch.setattr(agent, 'complete_json', fake)
+    run_id = client.post('/api/insights/'+parent_id+'/retry').json()['run_id']
+    process_one()
+    run = client.get('/api/runs/'+run_id).json()
+    assert run['result']['verification'] == 'checked' and len(calls) == 2
+    assert any('не найдена применимая' in text for text in run['result']['limitations'])
+    assert any(step['step'] == 'Повторный поиск аналитики' for step in run['trace'])
+
+
+def test_protocol_retry_keeps_evidence_packet_and_does_not_broaden_search(client, db, monkeypatch):
+    from app import agent
+    parent_id, _ = rejected_run(client, db)
+    searches, reviews, syntheses = [], [], []
+    original = agent.search_documents
+    def search(*args, **kwargs):
+        searches.append(kwargs)
+        return original(*args, **kwargs)
+    def fake(system, payload, **kwargs):
+        if 'Проверь, подтверждаются' in system:
+            reviews.append((payload, len(searches)))
+            return {} if len(reviews) == 1 else accepted_review(payload)
+        syntheses.append(payload)
+        return {'headline':payload['event'], 'impact':[{'text':'Если предстоит погашение, проверить договор.',
+            'feature_keys':['CL_PRODUCT_LOA_MARK'], 'assumption':True}]}
+    monkeypatch.setattr(settings(), 'demo_mode', False)
+    monkeypatch.setattr(agent, 'search_documents', search)
+    monkeypatch.setattr(agent, 'complete_json', fake)
+    run_id = client.post('/api/insights/'+parent_id+'/retry').json()['run_id']
+    process_one()
+    assert client.get('/api/runs/'+run_id).json()['result']['verification'] == 'checked'
+    assert len(syntheses) == 1 and len(reviews) == 2
+    assert reviews[0][0]['evidence'] == reviews[1][0]['evidence']
+    assert reviews[0][1] == reviews[1][1]
