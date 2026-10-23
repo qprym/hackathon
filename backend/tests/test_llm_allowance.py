@@ -65,6 +65,24 @@ def test_authorized_extension_preserves_first_twenty_and_stops_at_forty(gateway,
     assert llm.allowance_status(db)['requests_remaining'] == 0
 
 
+def test_new_extension_allows_only_twenty_more_after_thirty_nine(gateway, db, monkeypatch):
+    db.add(LlmAllowance(key=llm.ALLOWANCE_KEY, requests=39, spent=0.1))
+    db.commit()
+    monkeypatch.setattr(settings(), 'llm_request_limit', 59)
+    def attempt(index):
+        try:
+            llm.complete_json('test', {'i': index}, max_tokens=8)
+            return True
+        except llm.BudgetExceeded:
+            return False
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        assert sum(pool.map(attempt, range(30))) == 20
+    assert len(gateway) == 20
+    db.expire_all()
+    assert llm.allowance_status(db)['requests_used'] == 59
+    assert llm.allowance_status(db)['requests_remaining'] == 0
+
+
 @pytest.mark.parametrize('failure', ['timeout', 'invalid_json'])
 def test_failed_calls_consume_slots_without_automatic_retry(gateway, monkeypatch, failure):
     calls = []

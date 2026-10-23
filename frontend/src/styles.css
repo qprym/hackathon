@@ -1167,6 +1167,85 @@ form {
 .impact-panel .section-label {
   color: #cf7770;
 }
+.bank-perspective {
+  border-left: 4px solid #ef3124;
+}
+.authorship-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.authorship-heading h2 {
+  margin: 5px 0 0;
+  font-size: 19px;
+  line-height: 1.35;
+}
+.authorship-icon {
+  display: inline-flex;
+  padding: 11px;
+  border-radius: 12px;
+  flex-shrink: 0;
+}
+.authorship-icon.bank { color: #cc291e; background: #fff0ed; }
+.authorship-icon.ai { color: #5445a5; background: #ede9ff; }
+.authorship-badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .6px;
+}
+.authorship-badge.bank { color: #ba2b20; }
+.authorship-badge.ai { color: #5445a5; }
+.authorship-description {
+  color: #687183;
+  font-size: 12px;
+  line-height: 1.7;
+  margin: 0 0 20px;
+}
+.bank-publication {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid #ede7e5;
+  font-size: 12px;
+}
+.bank-publication-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 8px;
+  color: #687183;
+}
+.bank-publication-meta span { display: inline-flex; align-items: center; gap: 6px; }
+.bank-excerpt { margin-top: 12px; }
+.bank-excerpt summary { cursor: pointer; color: #9b352d; }
+.bank-excerpt blockquote {
+  margin: 12px 0;
+  padding: 12px 16px;
+  border-left: 2px solid #e5bcb6;
+  background: #fff9f8;
+  line-height: 1.8;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.ai-perspective {
+  border: 1px solid #ded8ef;
+  border-left: 4px solid #7565be;
+  border-radius: 14px;
+  padding: 22px;
+  background: #f8f7fc;
+  margin-bottom: 24px;
+}
+.ai-perspective .impact-panel { background: #fff; border-color: #e8e4f1; }
+.ai-perspective > .panel:last-child { margin-bottom: 0; }
+.ai-perspective .risk-grid { gap: 12px; }
+@media (max-width: 700px) {
+  .ai-perspective { padding: 16px 12px; }
+  .authorship-heading h2 { font-size: 17px; }
+  .authorship-icon { padding: 9px; }
+}
 .risk-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;

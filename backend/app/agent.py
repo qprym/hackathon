@@ -20,6 +20,9 @@ POLICY = """Ты аналитический компонент сервиса д
 Платежи не доказывают поставки. Не вычисляй рыночную долю из выборки. Не утверждай причинность без оснований.
 Для сценарных последствий используй условные формулировки и assumption=true. Эта метка не доказывает фактическую предпосылку.
 Не пиши «если высокая стоимость фондирования сохранится» без текущих котировок: это подразумевает уже доказанную высокую стоимость. Допустимо «если новая корпоративная котировка окажется выше заложенной в план».
+Не оценивай вероятность превышения финансового плана: его параметры неизвестны. Историческая риторика не доказывает текущую вероятность.
+Новые котировки влияют на новые сделки/пролонгации, не меняют автоматически фиксированные действующие договоры. Рост процентных расходов не означает автоматически рост потребности в оборотном капитале.
+Сохраняй точку зрения компании: её депозит — размещение средств (актив), кредит — обязательство. Не называй депозит компании её пассивом; пиши «условия размещения» и «условия финансирования». Сравнивая процентные расходы с планом, говори «выше плана», а не об их безусловном росте.
 Упоминая кредит, депозит или лизинг как факт о компании, укажи соответствующий подтверждённый признак; кредитный признак не подтверждает лизинг.
 Разделы impact, risks, opportunities, actions — аналитические сценарии и предложения: в них assumption всегда true, даже когда предложение опирается на факты.
 Для каждого утверждения возвращай evidence_ids и feature_keys; не изобретай идентификаторы.
@@ -165,6 +168,7 @@ def run_agent(db, run):
     insight = None
     model_insight = None
     correction_targets = None
+    review_feedback = []
     max_attempts = 2 if repair else 3
     for attempt in range(max_attempts):
         evidence = list({e["id"]: e for e in evidence if e['id'] not in rejected_bank_ids}.values())[:16]
@@ -205,7 +209,7 @@ def run_agent(db, run):
                             'replacement — полное утверждение Claim, строка для headline/limitations или null для удаления необоснованного пункта. '
                             'Нельзя удалить все facts или весь impact. Не добавляй новые выводы за пределами исправления. '
                             'Проверь фактические предпосылки даже в условном сценарии, даты и продуктовые признаки.',
-                            payload, run_id=run.id, max_tokens=14000, reasoning=True)
+                            payload, run_id=run.id, max_tokens=8000, reasoning=True)
                         model_insight = apply_patch_to_insight(model_insight, patch, correction_targets)
                     # A broken review protocol is retried without rewriting a valid draft.
                 else:
@@ -219,7 +223,7 @@ def run_agent(db, run):
                     "Каждый feature_key должен прямо обосновывать текст: не добавляй выручку или концентрацию к выводу, который их не использует. "
                     "Если есть draft_to_correct, исправь все замечания corrections; удали сомнительное утверждение, если доказательств для исправления нет. "
                     "Не копируй evidence, context или output_schema в ответ. Закрой JSON полностью.",
-                    payload, run_id=run.id, max_tokens=14000, reasoning=True))
+                    payload, run_id=run.id, max_tokens=8000, reasoning=True))
                 insight = restore_citations(model_insight, aliases)
                 trace(db, run, 'Черновик анализа', {'attempt': attempt, 'draft': insight.model_dump(),
                     'note': 'Структурированный ответ до проверки; не принятый аналитический вывод'})
@@ -239,10 +243,13 @@ def run_agent(db, run):
                 if any(issue.startswith(item_id + ':') for issue in issues)] or None) if issues else []
         if insight and not issues and not settings().demo_mode:
             packet = review_packet(model_insight, model_evidence, context, event_title=event.title,
-                                   event_date=event.published_at.isoformat(), question=run.question)
-            trace(db, run, 'Пакет проверки', {'attempt': attempt, 'protocol': 'claim-review-v1', 'payload': packet})
-            review_raw = complete_json(REVIEW_POLICY, packet, run_id=run.id, max_tokens=10000, reasoning=True)
+                                   event_date=event.published_at.isoformat(), question=run.question, quote_catalog=True)
+            if review_feedback:
+                packet['previous_review_errors'] = review_feedback
+            trace(db, run, 'Пакет проверки', {'attempt': attempt, 'protocol': packet['protocol'], 'payload': packet})
+            review_raw = complete_json(REVIEW_POLICY, packet, run_id=run.id, max_tokens=6000, reasoning=True)
             issues, correction_targets, search_queries = assess_review(review_raw, packet)
+            review_feedback = issues if not correction_targets else []
             queries = search_queries or queries
             trace(db, run, 'Ответ проверяющего', {'attempt': attempt, 'response': review_raw,
                 'issues': issues, 'correction_targets': correction_targets})

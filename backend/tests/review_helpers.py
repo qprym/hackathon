@@ -4,8 +4,10 @@ def accepted_review(packet):
     return {'checks': [
         {'item_id': item_id, 'verdict': 'supported', 'category': 'none',
          'text_span': item['text'], 'reason': 'Контрольный ответ проверяющего для теста протокола.',
-         'quotes': [{'evidence_id': ref, 'quote': sources[ref]['excerpt'][:200]}
-                    for ref in item.get('evidence_ids', [])],
+         **({'quote_ids': [sources[ref]['quote_fragments'][0]['id'] for ref in item.get('evidence_ids', [])]}
+            if packet.get('protocol') == 'claim-review-v2' else
+            {'quotes': [{'evidence_id': ref, 'quote': sources[ref]['excerpt'][:200]}
+                        for ref in item.get('evidence_ids', [])]}),
          'feature_keys': list(packet['company_grounds'][item_id])}
         for item_id, item in packet['items'].items()]}
 

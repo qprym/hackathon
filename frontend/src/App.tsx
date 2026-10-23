@@ -177,6 +177,7 @@ const labels: Record<string, string> = {
   FTS_COUNTRY_NAME: "Страна в данных ФТС",
   CL_PRODUCT_LOA_MARK: "Кредитные продукты",
   CL_PRODUCT_DEP_MARK: "Депозиты",
+  CL_PRODUCT_LEA_MARK: "Лизинг",
   CL_PRODUCT_GAR_MARK: "Банковские гарантии",
   CL_PRODUCT_RKO_MARK: "Расчетный счет",
   COMPANY_AGE_YEARS_GRADATION: "Возраст компании",
@@ -974,45 +975,60 @@ function Analysis({
                     onSource={onSource}
                   />
                 </section>
-                <section className="panel impact-panel">
-                  <div className="section-label">
-                    <Sparkles size={18} /> ВЛИЯНИЕ НА ВАШ БИЗНЕС
+                <section className="panel bank-perspective" aria-labelledby="bank-perspective-title">
+                  <div className="authorship-heading">
+                    <span className="authorship-icon bank"><BookOpen size={20} /></span>
+                    <div>
+                      <span className="authorship-badge bank">ИСТОЧНИК · АЛЬФА-БАНК</span>
+                      <h2 id="bank-perspective-title">{insight.evidence.some((e) => e.kind === "bank" && e.synthetic)
+                        ? "Учебная аналитика банка" : "Мнение экспертов Альфа-Банка"}</h2>
+                    </div>
                   </div>
-                  <Claims
-                    claims={insight.impact}
-                    insight={insight}
-                    onSource={onSource}
-                  />
-                  {!insight.impact.length && (
-                    <p>
-                      Персональная интерпретация не опубликована: недостаточно
-                      подтвержденных оснований.
-                    </p>
-                  )}
-                </section>
-                <section className="panel">
-                  <div className="section-label">
-                    <BookOpen size={18} />{" "}
-                    {insight.evidence.some(
-                      (e) => e.kind === "bank" && e.synthetic,
-                    )
-                      ? "УЧЕБНАЯ АНАЛИТИКА · НЕ ПОЗИЦИЯ БАНКА"
-                      : "ПОЗИЦИЯ АЛЬФА-БАНКА"}
-                  </div>
+                  <p className="authorship-description">{insight.evidence.some((e) => e.kind === "bank" && e.synthetic)
+                    ? "Синтетический пример, не реальное мнение экспертов."
+                    : "Краткий пересказ AI опубликованной аналитики банка. Мнение относится к дате материала."}</p>
                   {insight.bank_view.length ? (
-                    <Claims
-                      claims={insight.bank_view}
-                      insight={insight}
-                      onSource={onSource}
-                    />
+                    <Claims claims={insight.bank_view} insight={insight} onSource={onSource} />
                   ) : (
-                    <p className="muted">
-                      {insight.evidence.some((e) => e.kind === "bank")
-                        ? "Материалы банка найдены, но подтверждённый вывод по ним не сформирован. Фрагменты доступны в источниках."
-                        : "Подходящий материал банка не найден. Мнение банка не достраивается."}
-                    </p>
+                    <p className="muted">{insight.evidence.some((e) => e.kind === "bank")
+                      ? "Материалы банка найдены, но подтверждённый вывод по ним не сформирован. Фрагменты доступны в источниках."
+                      : "Подходящий материал банка не найден. Мнение банка не достраивается."}</p>
                   )}
+                  {insight.evidence.filter((e, i, all) => e.kind === "bank"
+                    && insight.bank_view.some((claim) => claim.evidence_ids.includes(e.id))
+                    && all.findIndex((candidate) => candidate.document_id === e.document_id
+                      && insight.bank_view.some((claim) => claim.evidence_ids.includes(candidate.id))) === i
+                  ).map((e) => (
+                    <div className="bank-publication" key={e.document_id}>
+                      <div className="bank-publication-meta">
+                        <span><Clock3 size={13} /> Материал от {new Date(e.published_at).toLocaleDateString("ru-RU")}</span>
+                        <button className="text-button" onClick={() => onSource(e.document_id)}>Открыть материал <ArrowUpRight size={14} /></button>
+                      </div>
+                      <strong>{e.title}</strong>
+                      <details className="bank-excerpt">
+                        <summary>Фрагмент из материала{e.page ? ` · стр. ${e.page}` : ""}</summary>
+                        <blockquote>{e.excerpt}</blockquote>
+                        <p className="muted small">Для материалов из PDF сверяйте распознанные числа с оригиналом.</p>
+                      </details>
+                    </div>
+                  ))}
                 </section>
+                <section className="ai-perspective" aria-labelledby="ai-perspective-title">
+                  <div className="authorship-heading">
+                    <span className="authorship-icon ai"><Sparkles size={20} /></span>
+                    <div>
+                      <span className="authorship-badge ai">{insight.mode === "demo" ? "ДЕМО · АНАЛИТИЧЕСКИЕ ПРАВИЛА" : "AI · ПЕРСОНАЛЬНЫЙ АНАЛИЗ"}</span>
+                      <h2 id="ai-perspective-title">{insight.mode === "demo" ? "Сценарии для вашей компании" : "Выводы AI для вашей компании"}</h2>
+                    </div>
+                  </div>
+                  <p className="authorship-description">{insight.mode === "demo"
+                    ? "Сценарии сформированы правилами без вызова модели."
+                    : "AI сопоставляет новость, материалы банка и профиль компании. Это сценарии и предложения модели, не мнение экспертов банка."}</p>
+                  <section className="panel impact-panel">
+                    <h3>Влияние на ваш бизнес</h3>
+                    <Claims claims={insight.impact} insight={insight} onSource={onSource} />
+                    {!insight.impact.length && <p>Персональная интерпретация не опубликована: недостаточно подтверждённых оснований.</p>}
+                  </section>
                 <div className="risk-grid">
                   {[
                     ["Риски", insight.risks, "risk"],
@@ -1044,6 +1060,7 @@ function Analysis({
                     onSource={onSource}
                   />
                 </section>
+                </section>
                 <div className="feedback">
                   <span>Разбор помог принять решение?</span>
                   <button
@@ -1072,10 +1089,9 @@ function Analysis({
                   <span className="icon-tile red">
                     <MessageSquare size={20} />
                   </span>
-                  <h3>Разберемся глубже</h3>
+                  <h3>Уточнить у AI</h3>
                   <p className="muted small">
-                    Уточните влияние события. Ответ использует контекст компании
-                    и проверяемые источники.
+                    AI ответит с учётом компании и источников. Ответ модели не является мнением экспертов Альфа-Банка.
                   </p>
                   {insight.mode === "demo" && (
                     <div className="form-note">
@@ -1105,6 +1121,7 @@ function Analysis({
                   </form>
                   {answer && (
                     <div className="answer">
+                      <span className="authorship-badge ai">Ответ AI</span>
                       {answer.question && <strong>{answer.question}</strong>}
                       {answer.status === "failed" ? (
                         <ErrorBox

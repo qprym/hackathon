@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from app.review import apply_patch_to_insight, assess_review, review_packet
+from app.review import apply_patch_to_insight, assess_review, review_packet, quote_present
 from app.schemas import Claim, Insight
 from app.validation import model_grounds, validate_insight
 from review_helpers import accepted_review, rejected_review
@@ -48,6 +48,39 @@ def test_joint_evidence_and_company_grounding_keep_source_dates():
     assert assess_review(review, packet)[0] == []
     review['editorial_notes'] = [{'item_id': 'limitations.1', 'suggestion': 'Можно сократить предупреждение.'}]
     assert assess_review(review, packet)[0] == []
+
+
+def test_quote_whitespace_does_not_change_words_values_or_source_identity():
+    assert quote_present('Ставка 12,34%. Условия договора.', 'Ставка\u00a012,34%.\nУсловия  договора.')
+    for quote in ('Ставка 12,35%.', 'Ставка 12,34%. ... договора.', 'Условия кредита.', '   '):
+        assert not quote_present(quote, 'Ставка\u00a012,34%.\nУсловия  договора.')
+    insight, sources, context = sample()
+    packet = packet_for(insight, sources, context)
+    raw = accepted_review(packet)
+    raw['checks'][1]['quotes'][0]['evidence_id'] = 'E3'
+    assert assess_review(raw, packet)[0]  # A matching date or similar source is not a substitute.
+
+
+def test_catalog_preserves_original_text_and_source_bindings():
+    insight, sources, context = sample()
+    sources[0]['excerpt'] += ('\nТочный\u00a0фрагмент с числом 12,34%. ' * 30) + '\n'
+    packet = review_packet(insight, sources, context, event_title=insight.headline,
+                           event_date='2026-10-21', quote_catalog=True)
+    for original, source in zip(sources, packet['evidence']):
+        assert 'excerpt' not in source  # Do not pay to transmit the same text twice.
+        assert ''.join(f['text'] for f in source['quote_fragments']) == original['excerpt']
+    raw = accepted_review(packet)
+    assert not assess_review(raw, packet)[0]
+    for ids in ([], ['invented'], ['E3.Q1']):
+        broken = copy.deepcopy(raw)
+        broken['checks'][1]['quote_ids'] = ids
+        issues, targets, _ = assess_review(broken, packet)
+        assert issues and not targets
+    broken = copy.deepcopy(raw)
+    broken['checks'][1]['quotes'] = [{'evidence_id': 'E1', 'quote': sources[0]['excerpt'][:200]}]
+    assert assess_review(broken, packet)[0]  # The live protocol never accepts copied substitutes.
+    issues, targets, _ = assess_review(rejected_review(packet), packet)
+    assert issues and targets == ['impact.0']  # Selecting a quote cannot override a material error.
 
 
 @pytest.mark.parametrize('mutation', [

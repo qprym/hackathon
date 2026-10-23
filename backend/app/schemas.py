@@ -65,6 +65,7 @@ class ReviewCheck(BaseModel):
     text_span: str = Field(min_length=3, max_length=1800)
     reason: str = Field(min_length=10, max_length=1200)
     quotes: list[EvidenceQuote] = Field(default_factory=list, max_length=12)
+    quote_ids: list[str] = Field(default_factory=list, max_length=12)
     feature_keys: list[str] = Field(default_factory=list, max_length=12)
     correction: str = Field(default='', max_length=900)
     missing_feature_keys: list[str] = Field(default_factory=list, max_length=12)
