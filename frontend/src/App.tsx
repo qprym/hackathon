@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import {
   ArrowDownLeft,
@@ -120,6 +120,9 @@ type Insight = {
 };
 type Run = {
   id: string;
+  company_id: string;
+  role: Role;
+  event_title: string;
   status: string;
   stage: string;
   result: Insight | null;
@@ -904,7 +907,7 @@ function Analysis({
       </div>}
       <div className="analysis-heading">
         <span className="eyebrow">ПЕРСОНАЛЬНЫЙ РАЗБОР</span>
-        <h1>{insight?.headline || "Собираем контекст события"}</h1>
+        <h1>{insight?.headline || run?.event_title || "Собираем контекст события"}</h1>
         {insight && (
           <div className="analysis-byline">
             <Building2 size={16} /> {insight.company_name}
@@ -938,7 +941,17 @@ function Analysis({
         </div>
       )}
       {run?.status === "failed" && (
-        <ErrorBox error={run.error || "Анализ не завершен"} />
+        <div className="panel">
+          <h2>Разбор не завершён</h2>
+          <ErrorBox error={run.error || "Анализ не завершен"} />
+          <p>Черновик не опубликован как проверенный вывод. Просмотр этого результата и журнала не вызывает модель.</p>
+          <details className="trace-panel">
+            <summary>Журнал незавершённого разбора · содержит непроверенный черновик</summary>
+            {run.trace.map((step, i) => <details key={i}>
+              <summary>{step.step}</summary><pre>{JSON.stringify(step.details, null, 2)}</pre>
+            </details>)}
+          </details>
+        </div>
       )}{" "}
       {insight && (
         <>
@@ -1306,6 +1319,8 @@ export default function App() {
     [revision, setRevision] = useState(0),
     [source, setSource] = useState<Source | null>(null),
     [sourceBusy, setSourceBusy] = useState(false);
+  const initialLink = useRef(true);
+  const pendingLinkedRun = useRef<Run | null>(null);
   useEffect(() => {
     api<User>("/auth/me")
       .then(setUser)
@@ -1315,12 +1330,17 @@ export default function App() {
   useEffect(() => {
     if (!user) return;
     let active = true;
+    const linkedId = initialLink.current ? new URLSearchParams(window.location.search).get("run") : null;
     api<Company[]>("/companies")
-      .then((c) => {
+      .then(async (c) => {
+        const linked = linkedId ? await api<Run>("/runs/" + encodeURIComponent(linkedId)) : null;
         if (active) {
+          initialLink.current = false;
+          pendingLinkedRun.current = linked;
           setCompanies(c);
+          if (linked) setRole(linked.role);
           setCompanyId((id) =>
-            c.some((v) => v.id === id) ? id : c[0]?.id || "",
+            linked?.company_id || (c.some((v) => v.id === id) ? id : c[0]?.id || ""),
           );
         }
       })
@@ -1352,6 +1372,11 @@ export default function App() {
           setContext(c);
           setItems(f.items);
           setTopics(f.topics);
+          const linked = pendingLinkedRun.current;
+          if (linked?.company_id === companyId && linked.role === role) {
+            setRunId(linked.id);
+            pendingLinkedRun.current = null;
+          }
         }
       })
       .catch((e) => {

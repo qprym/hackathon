@@ -5,9 +5,17 @@ from decimal import Decimal
 
 def numeric_values(text):
     # Compare full numeric values, never substrings (10 is not confirmed by 100).
-    matches = re.findall(r"(?<!\w)[+−-]?\d+(?:[ \u00a0\u202f]\d{3})*(?:[.,]\d+)?", text)
-    return {Decimal(re.sub(r"[ \u00a0\u202f]", "", value).replace(",", ".").replace("−", "-"))
-            for value in matches}
+    pattern = (r"(?<!\w)([+−-]?\d+(?:[ \u00a0\u202f]\d{3})*(?:[.,]\d+)?)"
+               r"(?:\s*(тыс(?:\.|яч(?:а|и|у|ей|ам|ами|ах)?)?|млн\.?|миллион(?:а|ов)?|млрд\.?|миллиард(?:а|ов)?|трлн\.?)\b\.?)?")
+    values = set()
+    for match in re.finditer(pattern, text, flags=re.I):
+        value, scale = match.groups()
+        number = Decimal(re.sub(r"[ \u00a0\u202f]", "", value).replace(",", ".").replace("−", "-"))
+        scale = (scale or '').lower()
+        factor = (1000 if scale.startswith('тыс') else 1_000_000 if scale.startswith(('млн', 'миллион'))
+                  else 1_000_000_000 if scale.startswith(('млрд', 'миллиард')) else 1_000_000_000_000 if scale.startswith('трлн') else 1)
+        values.add(number * factor)
+    return values
 
 
 def dated_numbers(text):

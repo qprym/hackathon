@@ -170,7 +170,7 @@ def create_run(db, user, body, question=None, parent=None):
     access_scope = sorted(set(user.company_ids))
     key = hashlib.sha256(json.dumps([user.id, access_scope, body.model_dump(), company.features, str(company.updated_at),
         [list(d) for d in documents], context_version, question, parent if question else None, settings().demo_mode,
-        settings().llm_analysis_id, settings().llm_extraction_id, "prompt-v14"], sort_keys=True, default=str).encode()).hexdigest()
+        settings().llm_analysis_id, settings().llm_extraction_id, "prompt-v15"], sort_keys=True, default=str).encode()).hexdigest()
     existing = db.scalar(select(Run).where(Run.cache_key == key, Run.status.in_(["queued", "running", "completed"])).order_by(Run.created_at.desc()))
     if existing and not (parent and not question and existing.status == 'completed' and (existing.result or {}).get('verification') == 'insufficient'):
         return {"run_id": existing.id, "cached": existing.status == "completed"}
@@ -207,7 +207,8 @@ def get_run(run_id: str, user: User = Depends(current_user), db: Session = Depen
     steps = [{**s, "details": {k: v for k, v in s["details"].items() if k != "counterparties"}} for s in run.trace]
     return {"id": run.id, "status": run.status, "stage": run.stage, "trace": steps,
             "result": run.result, "error": run.error, "question": run.question, "role": run.role,
-            "company_id": run.company_id, "event_id": run.event_id}
+            "company_id": run.company_id, "event_id": run.event_id,
+            "event_title": db.get(Event, run.event_id).title}
 
 
 @app.post("/api/insights/{run_id}/questions", status_code=202)
@@ -233,8 +234,10 @@ def feedback(run_id: str, body: FeedbackInput, user: User = Depends(current_user
 @app.post('/api/insights/{run_id}/retry', status_code=202)
 def retry_insight(run_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
     run = authorized_run(db, user, run_id)
-    if run.status != 'completed' or (run.result or {}).get('verification') != 'insufficient':
-        raise HTTPException(409, 'Повторная проверка доступна для отклонённого разбора')
+    rejected = run.status == 'completed' and (run.result or {}).get('verification') == 'insufficient'
+    interrupted_draft = run.status == 'failed' and any(step['step'] == 'Черновик анализа' for step in run.trace)
+    if not rejected and not interrupted_draft:
+        raise HTTPException(409, 'Повтор доступен для отклонённого разбора или сбоя после получения черновика')
     if not settings().demo_mode and allowance_status(db)['requests_remaining'] < 4:
         raise HTTPException(429, 'Для исправления с корректирующим циклом нужны четыре оставшихся обращения. Общий лимит не увеличен.')
     return create_run(db, user, Analyze(company_id=run.company_id, event_id=run.event_id, role=run.role), parent=run.id)

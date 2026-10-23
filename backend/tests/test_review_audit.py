@@ -5,7 +5,7 @@ import pytest
 
 from app.review import apply_patch_to_insight, assess_review, review_packet, quote_present
 from app.schemas import Claim, Insight
-from app.validation import model_grounds, validate_insight
+from app.validation import model_grounds, validate_insight, numeric_values
 from review_helpers import accepted_review, rejected_review
 
 
@@ -171,6 +171,27 @@ def test_numeric_dates_ranges_and_negative_values_have_distinct_meanings():
     for text in ('Ставка 11%.', 'Ставка 2026%.', 'На 12.09.2026 ставка 12,34%.',
                  'Срок 91–181 дней.', 'Динамика 5%.', 'В октябре 2026 ставка 12,34%.'):
         assert check(text), text
+
+
+@pytest.mark.parametrize('short,full', [
+    ('40 тыс. т', '40 000 т'), ('40 тысяч тонн', '40000 тонн'),
+    ('1,5 млн рублей', '1 500 000 рублей'), ('340 млрд долларов', '340000000000 долларов'),
+    ('2 миллиарда', '2000000000'), ('−2,5 млн', '-2500000'), ('0,5 трлн', '500000000000'),
+])
+def test_explicit_numeric_scales_are_exact(short, full):
+    assert numeric_values(short) == numeric_values(full)
+
+
+def test_number_scale_cannot_justify_a_different_quantity():
+    evidence = [{'id':'news', 'kind':'news', 'excerpt':'Танкер перевозит 40 000 т дизеля.'}]
+    def check(text):
+        return validate_insight(Insight(headline='Перевозка', facts=[Claim(text=text,evidence_ids=['news'])],
+            impact=[Claim(text='Если есть закупки топлива, уточнить календарь.',assumption=True)]),
+            evidence, {'features':{}}, event_source_ids={'news'})
+    assert not check('Танкер перевозит 40 тыс. т дизеля.')
+    for text in ('Танкер перевозит 40 т дизеля.', 'Танкер перевозит 41 тыс. т дизеля.',
+                 'Танкер перевозит 40 млн т дизеля.'):
+        assert check(text)
 
 
 def test_fact_assumption_and_bank_source_cannot_bypass_event_grounding():

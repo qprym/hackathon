@@ -120,6 +120,31 @@ def test_repair_fails_before_call_when_only_one_slot_remains(client, db, monkeyp
     assert client.post('/api/insights/'+parent_id+'/retry').status_code == 429
 
 
+def test_failed_draft_can_restart_without_repeating_paid_preparation(client, db, monkeypatch):
+    from app import agent
+    parent_id, _ = rejected_run(client, db)
+    parent = db.get(Run, parent_id)
+    parent.status, parent.result = 'failed', None
+    parent.trace = [{'step':'Черновик анализа', 'details':{'draft':{'untrusted':'old'}}}]
+    db.commit()
+    monkeypatch.setattr(settings(), 'demo_mode', False)
+    calls=[]
+    def fake(system,payload,**kwargs):
+        calls.append(payload)
+        if 'Проверь, подтверждаются' in system:
+            return accepted_review(payload)
+        assert payload['previous'] is None and 'untrusted' not in str(payload)
+        return {'headline':payload['event'], 'impact':[{'text':'Если предстоит погашение, проверить договор.',
+            'feature_keys':['CL_PRODUCT_LOA_MARK'], 'assumption':True}]}
+    monkeypatch.setattr(agent,'complete_json',fake)
+    response=client.post('/api/insights/'+parent_id+'/retry')
+    assert response.status_code==202
+    process_one()
+    child=client.get('/api/runs/'+response.json()['run_id']).json()
+    assert child['result']['verification']=='checked' and len(calls)==2
+    assert client.get('/api/runs/'+parent_id).json()['status']=='failed'
+
+
 def test_review_sees_features_and_correction_sees_current_draft(client, db, monkeypatch):
     from app import agent
     parent_id, _ = rejected_run(client, db)
