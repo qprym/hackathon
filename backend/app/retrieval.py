@@ -3,7 +3,9 @@ from datetime import timedelta
 from sqlalchemy import func, select
 from .db import utcnow
 from .models import Document, Event
-from .bank_relevance import SEARCH_VERSION, subject_match, words
+from .bank_relevance import SEARCH_VERSION, subject_match, subjects, words
+
+RANKING_VERSION = 'context-subject-v2'
 
 TOPICS = {
     "rates": ("ставк", "кредит", "процент", "рефинанс", "денежно-кредит"),
@@ -39,10 +41,16 @@ def tokens(text):
     return {w[:7] for w in re.findall(r"[а-яёa-z]{4,}", text.lower())}
 
 
-def rank_event(event, context, role):
+def rank_event(event, context, role, *, as_of=None):
     features = context["features"]
     has = lambda k: features.get(k, {}).get("value") is True
     topics = set(event.topics)
+    commodity = subjects(event.title) - {'policy_rate', 'deposit_rates', 'interest_rates'}
+    industry_subjects = subjects(context['industry'])
+    if re.search(r'металлоконструк|металлопрокат|черн\w* металл', context['industry'], re.I):
+        industry_subjects.add('steel')
+    subject_link = bool(commodity & industry_subjects)
+    direct = False
     score, reasons, keys = 0.0, [], []
     def add(points, reason, key):
         nonlocal score
@@ -51,32 +59,50 @@ def rank_event(event, context, role):
         keys.append(key)
     if "rates" in topics and has("CL_PRODUCT_LOA_MARK"):
         add(30, "Есть кредитные продукты: важны условия финансирования", "CL_PRODUCT_LOA_MARK")
+        direct = not commodity
     if "rates" in topics and has("CL_PRODUCT_DEP_MARK"):
         add(16, "Есть депозиты: важна доходность размещения средств", "CL_PRODUCT_DEP_MARK")
+        direct = direct or not commodity
     if "fx" in topics and has("FTS_FLAG"):
-        add(28, "Есть сведения ФТС: требуется оценка внешнеторговой экспозиции", "FTS_FLAG")
+        add(6 if commodity else 18, "Есть сведения ФТС; товары, валюты и направления операций неизвестны", "FTS_FLAG")
     sector = classify(context["industry"])
     for topic in topics.intersection(sector):
+        if commodity and not subject_link and topic != 'logistics':
+            continue
         add(20, f"Связь с деятельностью: {TOPIC_NAMES[topic].lower()}", "MAINOKVED_NAME")
-    if "logistics" in topics and any(t in context["industry"].lower() for t in ("производ", "торгов", "перевоз")):
-        add(18, "Деятельность связана с движением товаров", "MAINOKVED_NAME")
+        direct = direct or not commodity or subject_link
+    if commodity & {'diesel', 'gasoline', 'fuel'} and re.search(r'перевоз|автомобильн\w*\s+(?:грузов\w*\s+)?транспорт', context['industry'], re.I):
+        add(2 if 'logistics' in topics else 22,
+            "Топливо может влиять на затраты перевозчика; состав парка, договоры и доля затрат неизвестны", "MAINOKVED_NAME")
+    if subject_link:
+        add(16, "Предмет новости связан с указанным видом деятельности", "MAINOKVED_NAME")
+        direct = True
+    if "logistics" in topics and 'logistics' not in sector and any(t in context["industry"].lower() for t in ("производ", "торгов", "перевоз")):
+        add(6, "Возможна косвенная связь через движение товаров; конкретные маршруты и грузы неизвестны", "MAINOKVED_NAME")
     concentration = features.get("outgoing_concentration", {}).get("value", 0)
-    if topics.intersection({"logistics", "liquidity"}) and concentration > .5:
+    if topics.intersection({"logistics", "liquidity"}) and concentration > .5 and not commodity:
         add(10, "Исходящие платежи сконцентрированы на одном контрагенте", "outgoing_concentration")
     related = [c for c in context.get("counterparties", []) if topics.intersection(classify(c["industry"]))]
-    if related:
+    if related and not commodity:
         add(6, "Тема затрагивает отрасли связанных платежами компаний", "counterparty_count")
     if context["region"].lower() not in ("не указан", "") and context["region"].lower() in event.title.lower():
         add(14, "Событие относится к региону регистрации", "REGION")
+    exposure = 'direct' if direct else ('indirect' if keys else 'unknown')
+    note = ('Есть связь с признаками профиля; величина финансового эффекта не установлена.' if direct else
+            'Косвенная связь; конкретный товар, объём операций и механизм влияния нужно уточнить.' if commodity and keys else
+            'Косвенная связь по профилю; применимость события нужно уточнить.' if keys else
+            'Прямая связь с компанией по доступным признакам не установлена.')
     role_score = sum(ROLE_WEIGHTS[role].get(t, 0) for t in topics)
     score += min(role_score, 18)
     if role_score:
         reasons.append(f"Соответствует приоритетам роли {role}")
-    age = max((utcnow() - event.published_at).total_seconds() / 86400, 0)
+    age = max(((as_of or utcnow()) - event.published_at).total_seconds() / 86400, 0)
     score += max(0, 8 - age / 3)
-    score += min(len(event.document_ids), 3)
-    return {"score": round(min(score, 100), 1), "reasons": reasons or ["Общий экономический контекст; прямая связь пока не установлена"],
-            "feature_keys": list(dict.fromkeys(keys))}
+    # RSS and full text of the same article are not independent corroboration.
+    ceiling = 100 if direct else 39 if keys else 24
+    return {"score": round(min(score, ceiling), 1), "reasons": reasons or [note],
+            "feature_keys": list(dict.fromkeys(keys)), 'exposure': {'level': exposure, 'note': note},
+            'ranking_version': RANKING_VERSION}
 
 
 def search_documents(db, query, kind=None, before=None, synthetic=False, limit=6, focus=None):

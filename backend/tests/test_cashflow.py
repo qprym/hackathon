@@ -1,6 +1,11 @@
 import copy
 import pytest
 from app.cashflow import cashflow_issues
+
+
+def test_product_flags_do_not_prove_calendar_contents():
+    assert cashflow_issues('Есть кредиты и лизинг, поэтому календарь уже включает обслуживание обязательств.')
+    assert not cashflow_issues('Есть кредиты и лизинг. Проверьте, учитывает ли календарь все обязательства.')
 from app.review import assess_review, review_packet
 from app.schemas import Claim, Insight
 from app.validation import validate_insight

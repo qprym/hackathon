@@ -2,7 +2,7 @@ name: Verify
 on: [push, pull_request]
 jobs:
   backend:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -11,7 +11,7 @@ jobs:
       - run: python -m pytest
         working-directory: backend
   frontend:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -21,9 +21,12 @@ jobs:
       - run: npm run build
         working-directory: frontend
   compose:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       AUTO_FETCH_RSS: "false"
+      DEMO_MODE: "true"
+      LLM_API_KEY: ""
+      LLM_TEST_LIMIT_RUB: "0"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

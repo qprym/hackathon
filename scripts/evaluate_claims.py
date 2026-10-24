@@ -1,13 +1,30 @@
+"""Evaluate independent factual labels; historical versions cannot pass current acceptance."""
 import argparse
 import json
 from pathlib import Path
-parser = argparse.ArgumentParser()
-parser.add_argument('file', type=Path)
-args = parser.parse_args()
-claims = json.loads(args.file.read_text(encoding='utf8'))['claims']
-facts = [c for c in claims if not c.get('assumption')]
-if not facts or any(type(c.get('supported')) is not bool or not c.get('reviewer') for c in facts):
-    print(json.dumps({'status':'incomplete','factual_claims':len(facts),'message':'Independent factual review required'}))
-    raise SystemExit(2)
-rate = sum(c['supported'] for c in facts)/len(facts)
-print(json.dumps({'status':'reviewed','factual_claims':len(facts),'supported_fraction':rate,'target_met':rate>=.95}))
+
+
+def evaluate_claims(data):
+    facts = [c for c in data['claims'] if not c.get('assumption')]
+    current = [c for c in facts if not c.get('outdated', True)]
+    historical = [c for c in facts if c.get('outdated', True)]
+    def group(items):
+        missing = sum(type(c.get('supported')) is not bool or not c.get('reviewer') for c in items)
+        complete = bool(items) and not missing and bool(data.get('reviewer')) and bool(data.get('reviewed_at'))
+        return {'claims':len(items), 'missing_labels':missing,
+                'supported_fraction':sum(c['supported'] for c in items)/len(items) if complete else None}
+    result = {'current':group(current),'historical':group(historical),
+              'scenarios_excluded_from_factual_metric':len(data['claims'])-len(facts)}
+    rate = result['current']['supported_fraction']
+    result.update(status='reviewed' if rate is not None else 'historical_only' if historical and result['historical']['supported_fraction'] is not None else 'incomplete',
+                  target_met=rate >= .95 if rate is not None else None)
+    return result
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('file', type=Path)
+    args = parser.parse_args()
+    result = evaluate_claims(json.loads(args.file.read_text(encoding='utf8')))
+    print(json.dumps(result,ensure_ascii=False,indent=2))
+    raise SystemExit(0 if result['status']=='reviewed' else 2)

@@ -67,6 +67,26 @@ def reserve_budget(amount, *, count_request=False):
     return day
 
 
+def affordable_review_tokens(system, payload, *, preferred=8000, minimum=6000):
+    """Read-only preflight. The gateway still reserves the exact ceiling atomically."""
+    cfg = settings()
+    content = json.dumps(payload, ensure_ascii=False, default=str)
+    input_cost = (len((system + content).encode('utf-8')) + 512) * cfg.llm_input_rub_per_million / 1_000_000
+    day = datetime.now(ZoneInfo(cfg.llm_budget_timezone)).date().isoformat()
+    with SessionLocal() as db:
+        allowance = db.get(LlmAllowance, ALLOWANCE_KEY)
+        daily = db.get(Budget, day)
+        remaining = min(cfg.llm_test_limit_rub - (allowance.spent if allowance else 0),
+                        min(cfg.llm_daily_limit_rub, 500) - (daily.spent if daily else 0))
+    if cfg.llm_output_rub_per_million <= 0:
+        raise BudgetExceeded('Для проверки не настроены тарифы провайдера.')
+    limit = min(preferred, math.floor((remaining - input_cost) * 1_000_000 / cfg.llm_output_rub_per_million))
+    if limit < minimum:
+        raise BudgetExceeded('Остатка бюджета недостаточно для полной проверки: нужны входной пакет и минимум '
+                             f'{minimum} выходных токенов. Проверка не вызывалась, черновик не принят.')
+    return limit
+
+
 def complete_json(system, payload, *, run_id=None, extraction=False, max_tokens=2400, reasoning=False):
     cfg = settings()
     if cfg.demo_mode:

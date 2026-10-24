@@ -16,7 +16,8 @@ from .context import company_context
 from .db import SessionLocal, engine, get_db, initialize_development_schema, utcnow
 from .ingestion import FEEDS, extract_pdf, import_csv, import_document
 from .models import Audit, AuthSession, Budget, Company, Document, Event, Feedback, Link, Run, Usage, User
-from .retrieval import TOPIC_NAMES, rank_event, search_documents
+from .retrieval import TOPIC_NAMES, RANKING_VERSION, rank_event, search_documents
+from .quality import mode_metrics
 from .bank_relevance import SEARCH_VERSION
 from .schemas import Analyze, FeedbackInput, Login, NewsInput, Question, Role
 from .seed import seed
@@ -138,18 +139,20 @@ def feed(company_id: str, role: Role = "CFO", topic: str | None = None, corpus: 
     stmt = select(Event).where(Event.synthetic == (corpus == "synthetic"))
     if q.strip():
         stmt = stmt.where(Event.title.icontains(q.strip()[:200], autoescape=True))
-    events = db.scalars(stmt.order_by(Event.published_at.desc()).limit(500)).all()
+    events = db.scalars(stmt.order_by(Event.published_at.desc(), Event.id.desc()).limit(500)).all()
     entries = []
+    ranking_as_of = utcnow()
     for event in events:
         if topic and topic not in event.topics:
             continue
-        doc = db.get(Document, event.document_ids[0]) if event.document_ids else None
-        ranking = rank_event(event, ctx, role)
+        event_docs = db.scalars(select(Document).where(Document.id.in_(event.document_ids))).all() if event.document_ids else []
+        doc = next((d for d in event_docs if d.id == event.document_ids[0]), None) if event.document_ids else None
+        ranking = rank_event(event, ctx, role, as_of=ranking_as_of)
         entries.append({"id": event.id, "title": event.title, "topics": event.topics,
             "published_at": event.published_at.isoformat() + "Z", "synthetic": event.synthetic,
             "summary": doc.content[:230] if doc else "", "publisher": doc.publisher if doc else "",
-            "source_count": len(event.document_ids), **ranking})
-    entries.sort(key=lambda item: (item["score"], item["published_at"]), reverse=True)
+            "source_count": len({d.publisher.casefold().strip() for d in event_docs}), **ranking})
+    entries.sort(key=lambda item: (item["score"], item["published_at"], item['id']), reverse=True)
     return {"items": entries[:50], "topics": TOPIC_NAMES, "company_id": company_id, "role": role, "corpus": corpus}
 
 
@@ -172,7 +175,7 @@ def create_run(db, user, body, question=None, parent=None, single_pass=False):
     access_scope = sorted(set(user.company_ids))
     key = hashlib.sha256(json.dumps([user.id, access_scope, body.model_dump(), company.features, str(company.updated_at),
         [list(d) for d in documents], context_version, question, parent if question else None, settings().demo_mode,
-        settings().llm_analysis_id, settings().llm_extraction_id, "prompt-v18", SEARCH_VERSION, VALIDATION_VERSION], sort_keys=True, default=str).encode()).hexdigest()
+        settings().llm_analysis_id, settings().llm_extraction_id, "prompt-v18", SEARCH_VERSION, VALIDATION_VERSION, RANKING_VERSION], sort_keys=True, default=str).encode()).hexdigest()
     existing = db.scalar(select(Run).where(Run.cache_key == key, Run.status.in_(["queued", "running", "completed"])).order_by(Run.created_at.desc()))
     if existing and not (parent and not question and existing.status == 'completed' and (existing.result or {}).get('verification') == 'insufficient'):
         return {"run_id": existing.id, "cached": existing.status == "completed"}
@@ -375,11 +378,15 @@ def metrics(user: User = Depends(admin), db: Session = Depends(get_db)):
     feedback_counts = dict(db.execute(select(Feedback.category, func.count()).group_by(Feedback.category)).all())
     runs = db.scalars(select(Run).where(Run.status == "completed")).all()
     durations = [(r.finished_at-r.created_at).total_seconds() for r in runs if r.finished_at]
+    by_mode = mode_metrics(db.scalars(select(Run)).all(), db.scalars(select(Usage)).all())
     return {"runs": statuses, "feedback": feedback_counts, "llm_allowance": allowance_status(db),
+        "by_mode": by_mode,
         "budgets": [{"day": b.day, "spent_rub": round(b.spent, 4)} for b in db.scalars(select(Budget).order_by(Budget.day.desc()).limit(7))],
         "latency_avg_seconds": round(sum(durations)/len(durations), 2) if durations else None,
         "insufficient_count": sum(r.result.get("verification") == "insufficient" for r in runs if r.result),
         "source_errors": db.scalar(select(func.count()).select_from(Audit).where(Audit.action == "rss_error")),
+        "source_errors_24h": db.scalar(select(func.count()).select_from(Audit).where(
+            Audit.action == "rss_error", Audit.created_at >= utcnow() - timedelta(hours=24))),
         "documents": db.scalar(select(func.count()).select_from(Document)),
         "events": db.scalar(select(func.count()).select_from(Event)),
         "mode": "demo" if settings().demo_mode else "live",

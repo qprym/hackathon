@@ -1,40 +1,107 @@
-"""Export real event/claim review sheets locally; never assigns expert labels."""
+"""Export a private, reproducible human review bundle. Never assigns labels."""
 import argparse
 import json
 import sys
 from pathlib import Path
 from sqlalchemy import select
+
 root = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(root / 'backend'))
+from app.context import company_context
 from app.db import SessionLocal, utcnow
-from app.models import Company, Event, Run
+from app.models import Company, Document, Event, Run
+from app.retrieval import RANKING_VERSION
+from app.cashflow import VALIDATION_VERSION
+from app.bank_relevance import SEARCH_VERSION
 
-parser = argparse.ArgumentParser()
-parser.add_argument('--companies', nargs='+', required=True)
-parser.add_argument('--output', type=Path, required=True)
-args = parser.parse_args()
-with SessionLocal() as db:
-    if any(db.get(Company, key) is None for key in args.companies):
-        raise SystemExit('Unknown company')
-    events = db.scalars(select(Event).where(Event.synthetic.is_(False)).order_by(Event.published_at.desc()).limit(50)).all()
-    if len(events) < 50:
-        raise SystemExit('At least 50 real events are required')
-    dataset = {'status':'real-unreviewed','reviewer':None,'reviewed_at':None,'exported_at':utcnow().isoformat(),
-        'companies':args.companies, 'events':[{'id':e.id, 'title':e.title,'topics':e.topics,
-            'published_at':e.published_at.isoformat(), 'document_ids':e.document_ids,
-            'split':'holdout' if i < 20 else 'development',
-            'relevance':{f'{company}:{role}':None for company in args.companies for role in ('CEO','CFO','TREASURER')}}
-            for i,e in enumerate(events)]}
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(dataset, ensure_ascii=False, indent=2), encoding='utf8')
-    claims=[]
-    for run in db.scalars(select(Run).where(Run.company_id.in_(args.companies),Run.status=='completed')):
-        if not run.result or run.result.get('mode') != 'live':
+ROLES = ('CEO', 'CFO', 'TREASURER')
+
+
+def build_bundle(db, company_ids, excluded_ids=(), *, as_of=None):
+    if len(set(company_ids)) != 3:
+        raise ValueError('Exactly three distinct companies are required')
+    companies = [db.get(Company, key) for key in company_ids]
+    if any(c is None or c.synthetic for c in companies):
+        raise ValueError('Three real case companies are required')
+    as_of = as_of or utcnow()
+    contexts = {c.id: company_context(db, c, company_ids) for c in companies}
+    used = set(db.scalars(select(Run.event_id)).all()) | set(excluded_ids)
+    events = db.scalars(select(Event).where(Event.synthetic.is_(False), Event.published_at <= as_of,
+        Event.id.not_in(used)).order_by(Event.published_at.desc(), Event.id).limit(500)).all()
+    selected, seen_docs, seen_titles = [], set(), set()
+    excluded_events = db.scalars(select(Event).where(Event.id.in_(used))).all() if used else []
+    for e in excluded_events:
+        seen_docs.update(e.document_ids)
+        seen_titles.add(' '.join(e.title.casefold().split()))
+    for event in events:
+        title_key = ' '.join(event.title.casefold().split())
+        if title_key in seen_titles or seen_docs.intersection(event.document_ids):
             continue
+        documents = db.scalars(select(Document).where(Document.id.in_(event.document_ids),
+                                                     Document.synthetic.is_(False))).all()
+        if not documents:
+            continue
+        selected.append({'id': event.id, 'title': event.title, 'topics': event.topics,
+            'published_at': event.published_at.isoformat(), 'document_ids': event.document_ids,
+            'split': 'holdout' if len(selected) < 20 else 'development',
+            'sources': [{'id':d.id,'title':d.title,'publisher':d.publisher,'url':d.url,
+                         'published_at':d.published_at.isoformat(),'content':d.content,
+                         'coverage':(d.ingestion_meta or {}).get('coverage', 'unknown')} for d in documents],
+            'relevance': {f'{key}:{role}': None for key in company_ids for role in ROLES},
+            'comments': {}})
+        seen_docs.update(event.document_ids)
+        seen_titles.add(title_key)
+        if len(selected) == 50:
+            break
+    if len(selected) < 50:
+        raise ValueError('Need 50 unseen real events with source text after exclusions')
+    dataset = {'schema_version': 2, 'status': 'real-unreviewed', 'reviewer': None, 'reviewed_at': None,
+        'exported_at': as_of.isoformat(), 'ranking_as_of': as_of.isoformat(), 'ranking_version': RANKING_VERSION,
+        'companies': company_ids, 'contexts': contexts, 'events': selected,
+        'sampling': {'excluded_events': sorted(used), 'method':'Newest unseen events; newest 20 locked for holdout; next 30 development'},
+        'rubric': {'0':'Нет применимой связи с компанией и ролью','1':'Косвенная, но полезная связь',
+                   '2':'Приоритетная новость с конкретным механизмом влияния'},
+        'instructions': 'Оценивайте по источнику и профилю, не по порядку ленты. Сначала development; holdout после фиксации ранжирования. Пустая оценка — недостаточно данных, не ноль.'}
+    claims, seen_profiles = [], set()
+    for run in db.scalars(select(Run).where(Run.company_id.in_(company_ids), Run.status=='completed')
+                         .order_by(Run.created_at.desc(), Run.id)):
+        result = run.result or {}
+        key = (run.company_id, run.role)
+        if result.get('mode') != 'live' or result.get('verification') != 'checked' or key in seen_profiles:
+            continue
+        seen_profiles.add(key)
         for section in ('facts','bank_view','impact','risks','opportunities','actions','answer'):
-            for claim in run.result.get(section, []):
-                claims.append({'run_id':run.id,'company_id':run.company_id,'role':run.role,'section':section,**claim,
-                    'supported':None,'reviewer':None,'comment':'',
-                    'evidence':[e for e in run.result['evidence'] if e['id'] in claim['evidence_ids']]})
-    args.output.with_suffix('.claims.json').write_text(json.dumps({'claims':claims},ensure_ascii=False,indent=2),encoding='utf8')
-print('Exported 30 development / 20 holdout events with empty labels; live claims:',len(claims))
+            for index, claim in enumerate(result.get(section, [])):
+                claims.append({'id':f'{run.id}:{section}.{index}', 'run_id':run.id,'company_id':run.company_id,
+                    'role':run.role, 'section':section, **claim, 'supported':None,'reviewer':None,'comment':'',
+                    'context_features':result.get('context_features', {}),
+                    'validation_version':result.get('validation_version'), 'search_version':result.get('search_version'),
+                    'outdated':result.get('validation_version') != VALIDATION_VERSION or result.get('search_version') != SEARCH_VERSION,
+                    'evidence':[e for e in result.get('evidence', []) if e['id'] in claim['evidence_ids']]})
+    claimset = {'schema_version':2, 'kind':'claims', 'reviewer':None, 'reviewed_at':None,
+        'exported_at':as_of.isoformat(), 'scope':'Latest published checked live analysis per available company and role; historical versions marked separately',
+        'claims':claims}
+    return dataset, claimset
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--companies', nargs='+', required=True)
+    parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--exclude', type=Path, action='append', default=[])
+    args = parser.parse_args()
+    outputs = [args.output, args.output.with_suffix('.claims.json')]
+    if any(path.exists() for path in outputs):
+        raise SystemExit('Output already exists. Choose a new name; existing labels will not be overwritten.')
+    excluded = {e['id'] for path in args.exclude for e in json.loads(path.read_text(encoding='utf8'))['events']}
+    with SessionLocal() as db:
+        bundles = build_bundle(db, args.companies, excluded)
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    for path, data in zip(outputs, bundles):
+        with path.open('x', encoding='utf8') as stream:
+            json.dump(data, stream, ensure_ascii=False, indent=2, default=str)
+    print('Exported 30 development / 20 untouched holdout events, 450 empty labels; published live claims:', len(bundles[1]['claims']))
+
+
+if __name__ == '__main__':
+    main()

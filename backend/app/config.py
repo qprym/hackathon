@@ -7,7 +7,7 @@ APPROVED_MODELS = {
     "Gemma 4 26B A4B", "GLM-5.3-Flash", "Qwen3.6 35B A3B",
     "DeepSeek-V4.1-Flash", "Qwen3-VL-30B-A3B-Instruct", "Kimi-K2.6",
 }
-MAX_TRIAL_REQUESTS = 62  # 60 already used + 2 authorized for the next check; never reset usage.
+MAX_TRIAL_REQUESTS = 64  # 62 already used + 2 authorized; never reset usage.
 
 
 class Settings(BaseSettings):

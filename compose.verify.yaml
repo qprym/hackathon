@@ -1,0 +1,26 @@
+# Isolated local acceptance environment; cannot call a paid provider.
+services:
+  db:
+    environment:
+      POSTGRES_PASSWORD: verify-local-only
+  migrate:
+    environment: &verify-env
+      DATABASE_URL: postgresql+psycopg://alfa:verify-local-only@db:5432/alfa
+      DEMO_MODE: "true"
+      SEED_DEMO: "true"
+      DEMO_PASSWORD: demo-alfa-2026
+      LLM_API_KEY: ""
+      LLM_BASE_URL: ""
+      LLM_TEST_LIMIT_RUB: "0"
+      LLM_INPUT_RUB_PER_MILLION: "0"
+      LLM_OUTPUT_RUB_PER_MILLION: "0"
+      LLM_REQUEST_LIMIT: "20"
+      AUTO_FETCH_RSS: "false"
+      COOKIE_SECURE: "false"
+      ALLOWED_ORIGINS: http://localhost:8081,http://127.0.0.1:8081
+  api:
+    environment: *verify-env
+  worker:
+    environment: *verify-env
+  web:
+    ports: !override ["127.0.0.1:8081:80"]

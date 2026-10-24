@@ -11,6 +11,13 @@ from review_helpers import accepted_review, rejected_review
 from test_live_recovery import rejected_run
 
 
+@pytest.fixture(autouse=True)
+def review_budget(monkeypatch):
+    for key, value in {'llm_test_limit_rub': 30, 'llm_input_rub_per_million': 1,
+                       'llm_output_rub_per_million': 1}.items():
+        monkeypatch.setattr(settings(), key, value)
+
+
 def old_checked_run(client, db):
     run_id, body = rejected_run(client, db)
     parent = db.get(Run, run_id)

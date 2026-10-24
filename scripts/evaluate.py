@@ -1,39 +1,63 @@
+"""Score human labels using immutable profile/time snapshots; no API calls."""
 import argparse
 import json
 import sys
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
+from types import SimpleNamespace
 root = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(root / 'backend'))
-from app.context import company_context
-from app.db import SessionLocal, utcnow
-from app.models import Company, Event
-from app.retrieval import rank_event
+from app.retrieval import RANKING_VERSION, rank_event
 
-parser = argparse.ArgumentParser()
-parser.add_argument('--split', choices=['development', 'holdout'], default='holdout')
-parser.add_argument('--data', type=Path, default=root / 'data/evaluation/events.json')
-args = parser.parse_args()
-dataset = json.loads(args.data.read_text(encoding='utf-8'))
-records = [e for e in dataset['events'] if e['split'] == args.split]
-missing = sum(v is None for r in records for v in r['relevance'].values())
-if missing or not dataset.get('reviewer') or not dataset.get('reviewed_at'):
-    print(json.dumps({'status': 'incomplete', 'split': args.split, 'events':len(records), 'missing_labels':missing,
-        'message':'Independent human labels and reviewer metadata are required. No quality score is asserted.'}, indent=2))
-    raise SystemExit(2)
-results = {}
-with SessionLocal() as db:
-    for company_id in dataset.get('companies', ['demo-metal','demo-retail','demo-logistics']):
-        company = db.get(Company,company_id)
-        if company is None:
-            raise SystemExit('Seed the demo database before evaluating. Set DATABASE_URL to the intended instance.')
-        context = company_context(db,company)
-        for role in ['CEO','CFO','TREASURER']:
+ROLES = ('CEO','CFO','TREASURER')
+
+
+def timestamp(value):
+    value = datetime.fromisoformat(value.replace('Z', '+00:00'))
+    return value.astimezone(timezone.utc).replace(tzinfo=None) if value.tzinfo else value
+
+
+def evaluate(dataset, split):
+    records = [e for e in dataset['events'] if e['split'] == split]
+    companies = dataset['companies']
+    keys = [f'{c}:{r}' for c in companies for r in ROLES]
+    missing = sum(type(e.get('relevance',{}).get(key)) is not int or e['relevance'][key] not in (0,1,2)
+                  for e in records for key in keys)
+    required = 20 if split == 'holdout' else 30
+    if (len(records) != required or len({e['id'] for e in dataset['events']}) != len(dataset['events'])
+            or len(set(companies)) != 3 or missing or not dataset.get('reviewer') or not dataset.get('reviewed_at')):
+        return {'status':'incomplete','split':split,'events':len(records),'missing_labels':missing,
+                'message':'Need three companies, complete independent labels, reviewer/date and 30/20 distinct events; no score asserted.'}
+    if not dataset.get('ranking_as_of') or any(c not in dataset.get('contexts',{}) for c in companies):
+        return {'status':'incomplete','message':'Export a snapshot bundle: contexts and ranking_as_of are required.'}
+    as_of = timestamp(dataset['ranking_as_of'])
+    scores, top_ids = {}, {}
+    for company_id in companies:
+        for role in ROLES:
             key = f'{company_id}:{role}'
-            ordered = sorted(records,key=lambda r:rank_event(Event(title=r['title'],topics=r['topics'],published_at=datetime.fromisoformat(r['published_at'].rstrip('Z')) if r.get('published_at') else utcnow(),document_ids=r.get('document_ids', [])),context,role)['score'],reverse=True)
-            top = ordered[:5]
-            if any(r['relevance'][key] not in [0,1,2] for r in ordered):
-                raise SystemExit('Relevance labels must be 0, 1 or 2.')
-            results[key] = sum(r['relevance'][key] >= 1 for r in top)/len(top)
-print(json.dumps({'split':args.split,'precision_at_5':results,'macro_average':sum(results.values())/len(results),
-    'synthetic_scaffold':dataset.get('status','').startswith('synthetic'),'reviewer':dataset['reviewer']},indent=2))
+            def order(record):
+                date = timestamp(record['published_at'])
+                event = SimpleNamespace(title=record['title'],topics=record['topics'],published_at=date)
+                return rank_event(event, dataset['contexts'][company_id], role, as_of=as_of)['score'], date, record['id']
+            top = sorted(records,key=order,reverse=True)[:5]
+            scores[key] = sum(r['relevance'][key] >= 1 for r in top)/5
+            top_ids[key] = [r['id'] for r in top]
+    return {'status':'reviewed','split':split,'precision_at_5':scores,'macro_average':sum(scores.values())/len(scores),
+        'target_met':all(v >= .8 for v in scores.values()), 'top_event_ids':top_ids,
+        'ranking_version':RANKING_VERSION,'exported_ranking_version':dataset.get('ranking_version'),
+        'ranking_as_of':dataset['ranking_as_of'],'reviewer':dataset['reviewer'],
+        'synthetic_scaffold':dataset.get('status','').startswith('synthetic')}
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--split', choices=['development','holdout'], default='holdout')
+    parser.add_argument('--data', type=Path, required=True)
+    args = parser.parse_args()
+    result = evaluate(json.loads(args.data.read_text(encoding='utf8')), args.split)
+    print(json.dumps(result,ensure_ascii=False,indent=2))
+    raise SystemExit(0 if result['status']=='reviewed' else 2)
+
+
+if __name__ == '__main__':
+    main()

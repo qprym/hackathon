@@ -81,6 +81,7 @@ type EventItem = {
   published_at: string;
   synthetic: boolean;
   source_count: number;
+  exposure: { level: "direct" | "indirect" | "unknown"; note: string };
 };
 type Evidence = {
   id: string;
@@ -165,6 +166,9 @@ type Metrics = {
   latency_avg_seconds: number | null;
   insufficient_count: number;
   source_errors: number;
+  source_errors_24h: number;
+  by_mode: Record<string, { total: number; checked: number; insufficient: number; latency_samples: number;
+    latency_avg_seconds: number | null; latency_p50_seconds: number | null; latency_p95_seconds: number | null }>;
   documents: number;
   events: number;
   quality_note: string;
@@ -1290,7 +1294,7 @@ function MetricsPanel() {
           ["Материалов", metrics.documents],
           ["Событий", metrics.events],
           ["Готовых разборов", metrics.runs.completed || 0],
-          ["Среднее время", `${metrics.latency_avg_seconds ?? "—"} сек`],
+          ["Среднее время · LLM", `${metrics.by_mode.live.latency_avg_seconds ?? "—"} сек`],
         ].map(([l, v]) => (
           <div className="panel metric" key={l}>
             <span>{l}</span>
@@ -1299,11 +1303,22 @@ function MetricsPanel() {
         ))}
       </div>
       <div className="two-columns">
+        {([['live', 'Реальная LLM'], ['demo', 'Учебные сценарии']] as const).map(([mode, title]) => {
+          const group = metrics.by_mode[mode];
+          return <div className="panel" key={mode}><h3>{title}</h3>
+            <div className="context-line"><span>Запусков / прошли самопроверку</span><strong>{group.total} / {group.checked}</strong></div>
+            <div className="context-line"><span>Недостаточно оснований</span><strong>{group.insufficient}</strong></div>
+            <div className="context-line"><span>Медиана / P95, сек</span><strong>{group.latency_p50_seconds ?? '—'} / {group.latency_p95_seconds ?? '—'}</strong></div>
+            <p className="form-note">Время включает очередь и обработку: {group.latency_samples} завершённых запусков. Самопроверка не заменяет независимую оценку.</p>
+          </div>;
+        })}
+      </div>
+      <div className="two-columns">
         <div className="panel">
           <h3>Качество и обратная связь</h3>
           {Object.entries({
             "Недостаточно оснований": metrics.insufficient_count,
-            "Ошибки источников": metrics.source_errors,
+            "Ошибки источников за 24 часа": metrics.source_errors_24h,
             Полезно: metrics.feedback.useful || 0,
             "Не по теме": metrics.feedback.irrelevant || 0,
             "Ошибка факта": metrics.feedback.factual_error || 0,
@@ -1314,6 +1329,8 @@ function MetricsPanel() {
             </div>
           ))}
           <p className="form-note">{metrics.quality_note}</p>
+          <p className="form-note">Режим не установлен у {metrics.by_mode.unknown.total} запусков; они не включены в показатели LLM и учебных сценариев. Ошибок источников за всё время: {metrics.source_errors}.</p>
+          <a className="text-button" href="/review.html" target="_blank" rel="noreferrer">Открыть форму независимой разметки <ArrowUpRight size={15} /></a>
         </div>
         <div className="panel">
           <h3>Бюджет моделей</h3>
@@ -1794,9 +1811,9 @@ export default function App() {
                                 }
                               >
                                 <span />
-                                {event.score >= 40
+                                {event.score >= 40 && event.exposure.level === 'direct'
                                   ? "Высокая значимость"
-                                  : "В контексте бизнеса"}
+                                  : event.exposure.level === 'indirect' ? "Косвенная связь" : "В контексте бизнеса"}
                               </span>
                               <span>
                                 <Clock3 size={13} />
@@ -1817,6 +1834,7 @@ export default function App() {
                               <div>
                                 <strong>Почему важно для вас</strong>
                                 <p>{event.reasons.slice(0, 2).join(". ")}</p>
+                                <p className="small muted">{event.exposure.note}</p>
                               </div>
                             </div>
                             <div className="event-footer">

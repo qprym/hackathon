@@ -5,7 +5,7 @@ from pydantic import ValidationError
 from .config import settings
 from .context import company_context
 from .db import utcnow
-from .llm import ModelUnavailable, complete_json
+from .llm import ModelUnavailable, complete_json, affordable_review_tokens
 from .models import Company, Event, Run, User
 from .retrieval import TOPICS, TOPIC_NAMES, event_evidence, rank_event, search_documents
 from .schemas import Claim, Insight, InsightPatch
@@ -266,7 +266,10 @@ def run_agent(db, run):
             if review_feedback:
                 packet['previous_review_errors'] = review_feedback
             trace(db, run, 'Пакет проверки', {'attempt': attempt, 'protocol': packet['protocol'], 'payload': packet})
-            review_raw = complete_json(REVIEW_POLICY, packet, run_id=run.id, max_tokens=8000, reasoning=True)
+            review_limit = affordable_review_tokens(REVIEW_POLICY, packet) if single_pass else 8000
+            trace(db, run, 'Лимит проверки', {'max_output_tokens': review_limit,
+                'note': 'Полный пакет и все правила сохранены; усечённый вердикт не разрешает публикацию.'})
+            review_raw = complete_json(REVIEW_POLICY, packet, run_id=run.id, max_tokens=review_limit, reasoning=True)
             issues, correction_targets, search_queries = assess_review(review_raw, packet)
             review_feedback = issues if not correction_targets else []
             queries = search_queries or queries

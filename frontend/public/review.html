@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="ru">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'none'; img-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<title>Независимая разметка · Альфа Контекст</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f5f6f8;color:#202125;font:16px/1.55 system-ui,sans-serif}header,main{max-width:1180px;margin:auto;padding:24px}header{padding-bottom:8px}h1{font-size:30px;margin:4px 0}h2{font-size:22px}h3{font-size:18px}p{margin:10px 0}.muted{color:#656773;font-size:14px}.panel{background:white;border:1px solid #e2e4e9;border-radius:16px;padding:24px;margin-bottom:20px}label{display:grid;gap:6px;font-weight:600}input,select,button,textarea{font:inherit;border:1px solid #c9ccd5;border-radius:8px;padding:10px;background:white;color:inherit}textarea{width:100%;min-height:95px}button{cursor:pointer}button.primary{background:#e51c23;color:white;border-color:#e51c23}button:disabled{opacity:.45;cursor:default}.toolbar{display:flex;gap:16px;align-items:end;flex-wrap:wrap}.toolbar label{flex:1 1 200px;min-width:200px;grid-template-columns:minmax(0,1fr)}.toolbar input,.toolbar select{min-width:0;width:100%;max-width:100%}.toolbar button{white-space:nowrap}.grid{display:grid;grid-template-columns:1.5fr 1fr;gap:20px}.source{white-space:pre-wrap;overflow-wrap:anywhere;font-size:15px}.source-scroll{max-height:550px;overflow:auto;border-top:1px solid #eee;padding:12px 0}details{margin:12px 0}summary{cursor:pointer;font-weight:600}table{border-collapse:collapse;width:100%;font-size:13px}td,th{text-align:left;vertical-align:top;border-bottom:1px solid #eee;padding:8px;overflow-wrap:anywhere}th{width:38%}#error{color:#a61218;white-space:pre-wrap}#progress{font-weight:600}.pill{display:inline-block;border-radius:20px;padding:3px 10px;background:#eef0f6;font-size:13px}.rubric{font-size:14px;padding:12px;background:#f5f6f8;border-radius:8px}.warning{color:#8c5300;background:#fff4dc;padding:12px;border-radius:8px}.role-note{background:#f1f0fc;padding:12px;border-radius:8px}nav{display:flex;gap:12px;align-items:center;margin:16px 0}a{color:#b71920}#workspace[hidden]{display:none}@media(max-width:800px){.grid{grid-template-columns:1fr}header,main{padding:16px}.panel{padding:18px}h1{font-size:25px}}
+</style></head>
+<body>
+<header><span class="pill">АЛЬФА · КОНТЕКСТ / ОЦЕНКА КАЧЕСТВА</span><h1>Независимая разметка</h1>
+<p>Сначала прочитайте новость и профиль компании. Оцените её пользу для выбранной роли.</p>
+<p class="muted">Файл обрабатывается только в этом окне. Данные не отправляются на сервер или в LLM. Сохраняйте прогресс перед закрытием; продолжить можно из сохранённого JSON.</p></header>
+<main>
+<section class="panel"><div class="toolbar">
+<label>Файл для разметки<input id="file" type="file" accept=".json,application/json"></label>
+<label>Ваше имя или псевдоним<input id="reviewer" autocomplete="off" placeholder="Автор независимой оценки"></label>
+<button id="save" class="primary" disabled>Сохранить прогресс</button></div>
+<p id="error" role="alert"></p><p id="progress" aria-live="polite">Загрузите evaluation-*.json или файл *.claims.json.</p></section>
+<section id="workspace" hidden>
+<div class="panel toolbar">
+<label id="splitLabel">Часть набора<select id="split"><option value="development">Настройка · 30 событий</option><option value="holdout">Итоговая проверка · 20 событий</option></select></label>
+<label id="companyLabel">Компания<select id="company"></select></label>
+<label id="roleLabel">Роль<select id="role"><option value="CEO">Генеральный директор</option><option value="CFO">Финансовый директор</option><option value="TREASURER">Казначей</option></select></label>
+</div>
+<p id="holdout" class="warning" hidden>Итоговую часть размечайте после фиксации версии ранжирования. Эти события нельзя использовать для настройки.</p>
+<nav><button id="prev">← Назад</button><span id="position"></span><button id="next">Далее →</button><button id="unmarked">Следующий без оценки</button></nav>
+<div class="grid"><article class="panel"><span id="meta" class="pill"></span><h2 id="title"></h2><div id="materials"></div></article>
+<aside><section class="panel"><h2 id="assessmentTitle">Оценка релевантности</h2><p id="roleNote" class="role-note"></p>
+<p id="rubric" class="rubric"></p><label>Ваша оценка<select id="label"></select></label>
+<label style="margin-top:16px">Комментарий<textarea id="comment" placeholder="На чём основана оценка; каких данных не хватает"></textarea></label></section>
+<section class="panel"><h2>Контекст компании</h2><div id="context"></div></section></aside></div>
+</section></main>
+<script src="/review.js" defer></script>
+</body></html>
