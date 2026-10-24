@@ -5,7 +5,7 @@ and explicit denials are kept separate from claims that money follows from a bud
 """
 import re
 
-VALIDATION_VERSION = 'cashflow-v1'
+VALIDATION_VERSION = 'financial-v2'
 
 FINANCIAL_LOGIC = """Проверяй каждое звено финансового вывода, даже внутри «если» и при assumption=true.
 Расходы в пределах/на уровне бюджета означают только отсутствие перерасхода: это не экономия и не новые деньги.

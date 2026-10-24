@@ -7,6 +7,7 @@ from pathlib import Path
 from .schemas import Insight
 from .validation import validate_insight
 from .cashflow import VALIDATION_VERSION, financial_findings
+from .forecast import forecast_findings
 from .review import assess_review, review_items
 
 
@@ -39,6 +40,9 @@ def replay(directory, annotations=()):
             financial = financial_findings(review_items(Insight.model_validate(saved['draft'])))
             if financial:
                 counts['cashflow_flagged_drafts'] += 1
+            forecast = forecast_findings(review_items(Insight.model_validate(saved['draft'])))
+            if forecast:
+                counts['forecast_scope_flagged_drafts'] += 1
             reviewed = None
             if 'review_packet' in saved and 'review_response' in saved:
                 current_issues, targets, _ = assess_review(saved['review_response'], saved['review_packet'])
@@ -65,6 +69,7 @@ def replay(directory, annotations=()):
                 'snapshot': 'reconstructed_from_same_run_result' if available else 'missing',
                 'local_issues_now': local_issues, 'original_issues': issues,
                 'cashflow_issues_now': financial, 'saved_review_replay': reviewed,
+                'forecast_scope_issues_now': forecast,
                 'semantic_status': 'not_rechecked', 'published': False})
     return {'paid_calls': 0, 'validation_version': VALIDATION_VERSION,
             'method': 'local validation, saved review protocol replay and curated annotations; no new model verdict',

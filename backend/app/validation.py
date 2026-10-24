@@ -3,6 +3,7 @@ import re
 from datetime import datetime
 from decimal import Decimal
 from .cashflow import cashflow_issues
+from .forecast import price_forecast_issues
 
 def numeric_values(text):
     # Compare full numeric values, never substrings (10 is not confirmed by 100).
@@ -91,6 +92,7 @@ def validate_insight(insight, evidence, context, event_source_ids=None):
             item_id = f'{section}.{index}'
             if section in ('impact', 'risks', 'opportunities', 'actions', 'answer'):
                 issues.extend(f'{item_id}: {issue}' for issue in cashflow_issues(claim.text))
+                issues.extend(f'{item_id}: {issue}' for issue in price_forecast_issues(claim.text))
             if any(ref not in known for ref in claim.evidence_ids):
                 issues.append(f"{item_id}: неизвестная ссылка на источник")
             if any(key not in context["features"] for key in claim.feature_keys):
@@ -131,6 +133,8 @@ def validate_insight(insight, evidence, context, event_source_ids=None):
                     issues.append(f'{item_id}: дата отсутствует в цитируемом фрагменте и метаданных')
     if not insight.impact:
         issues.append("Нет интерпретации влияния на компанию")
+    for index, text in enumerate(insight.limitations):
+        issues.extend(f'limitations.{index}: {issue}' for issue in price_forecast_issues(text))
     for index, claim in enumerate(insight.bank_view):
         direct_ids = {ref for ref in claim.evidence_ids
                       if known.get(ref, {}).get('relevance', {}).get('level') not in ('background', 'irrelevant')}
