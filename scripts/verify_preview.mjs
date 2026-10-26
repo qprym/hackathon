@@ -1,4 +1,4 @@
-// Read-only browser audit of the existing keyless preview; no model submissions.
+// Browser audit of the keyless preview: reads saved responses and opens one static fixture; no inference.
 import { chromium } from '../frontend/node_modules/playwright/index.mjs';
 import { expect } from '../frontend/node_modules/@playwright/test/index.mjs';
 import { mkdir, writeFile } from 'node:fs/promises';
@@ -12,6 +12,8 @@ try {
   await page.goto(base);
   await page.getByRole('button',{name:'Войти в кабинет'}).click();
   await expect(page.getByLabel('Компания',{exact:true})).toBeVisible();
+  await expect(page.locator('.event-card').first()).toBeVisible();
+  expect(['U_26491','U_989','U_6923']).toContain(await page.getByLabel('Компания',{exact:true}).inputValue());
   const before=await (await context.request.get(base+'/api/admin/metrics')).json();
   const rows=[];
   for(const company of ['U_26491','U_989','U_6923']) for(const role of ['CEO','CFO','TREASURER']) {
@@ -21,6 +23,7 @@ try {
     const ready=page.waitForResponse(r=>r.url().includes('/api/feed?')&&r.url().includes('company_id='+company)&&r.url().includes('role='+role)&&r.url().includes('scope=personal'));
     await page.getByRole('button',{name:'Для моей компании',exact:true}).click();
     const response=await ready;expect(response.status()).toBe(200);const feed=await response.json();
+    expect(feed.total).toBeGreaterThan(0);
     await expect(page.locator('.event-card')).toHaveCount(Math.min(5,feed.total));
     const titles=await page.locator('.event-card h3').allTextContents();
     if(feed.next_offset!=null){
@@ -37,6 +40,19 @@ try {
   await page.screenshot({path:'tmp/preview-audit/feed.png',fullPage:true});
   await page.getByRole('button',{name:'Контекст компании',exact:true}).click();
   await expect(page.getByRole('heading',{name:'Поиск по всем платёжным связям'})).toBeVisible();
+  await page.getByRole('button',{name:'Новостная аналитика',exact:true}).click();
+  await page.getByLabel('Компания',{exact:true}).selectOption('U_11656');
+  await expect(page.getByRole('heading',{name:'Подборка для этой компании ещё не подготовлена'})).toBeVisible();
+  await expect(page.locator('.overview-metrics')).toContainText('подборка ещё не готова');
+  await page.getByRole('button',{name:'Показать все материалы',exact:true}).click();
+  await expect(page.locator('.event-card').first()).toBeVisible();
+  await page.getByRole('button',{name:'Готовые примеры',exact:true}).click();
+  await expect(page.locator('.library-card')).toHaveCount(3);
+  await page.screenshot({path:'tmp/preview-audit/examples.png',fullPage:true});
+  await page.locator('.library-card').filter({has:page.getByRole('heading',{name:'Северный металл',exact:true})})
+    .getByRole('button',{name:'Открыть разбор · CFO',exact:true}).click();
+  await expect(page.getByText('ГОТОВЫЙ УЧЕБНЫЙ ПРИМЕР',{exact:true})).toBeVisible();
+  await page.screenshot({path:'tmp/preview-audit/example-analysis.png',fullPage:true});
   await page.goto(base+'/?run=7d517cf8-ac88-4184-924d-590d0c31414b');
   await expect(page.getByRole('heading',{name:'Мнение экспертов Альфа-Банка',exact:true})).toBeVisible({timeout:20000});
   await expect(page.getByRole('heading',{name:'Выводы AI для вашей компании',exact:true})).toBeVisible();

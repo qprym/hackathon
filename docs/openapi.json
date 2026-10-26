@@ -105,6 +105,59 @@
         }
       }
     },
+    "/api/examples": {
+      "get": {
+        "summary": "Examples",
+        "operationId": "examples_api_examples_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/examples/{example_id}/open": {
+      "post": {
+        "summary": "Show Example",
+        "operationId": "show_example_api_examples__example_id__open_post",
+        "parameters": [
+          {
+            "name": "example_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Example Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/companies/{company_id}/context": {
       "get": {
         "summary": "Context",
@@ -1167,6 +1220,12 @@
             "type": "object",
             "title": "Pipeline",
             "description": "Автоматическая обработка и доступность настроенной модели"
+          },
+          "personalization": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Personalization",
+            "description": "Готовность персонализации независимо от фильтров; not_processed не означает нерелевантность"
           }
         },
         "additionalProperties": true,

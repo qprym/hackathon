@@ -1,66 +1,43 @@
-"""Fixtures are synthetic. They are not bank research, live news or real organizations."""
+"""Fixtures are synthetic, versioned and included in the repository and image."""
 from datetime import timedelta
-from sqlalchemy import select
 from .auth import hash_password
 from .config import settings
 from .context import feature
 from .db import SessionLocal, utcnow
 from .ingestion import digest, import_document
 from .models import Company, Link, User
+from .showcase import bundle
 
-DEMO_EVENTS = [
-    ("Ставка без изменений: что проверить в кредитном портфеле", "rates", "В учебном сценарии регулятор оставил ключевую ставку без изменений. Участники рынка обсуждают условия кредитования и рефинансирования. Решение не определяет условия конкретных кредитных договоров.", 0),
-    ("Перевозчики предупреждают о росте сроков доставки", "logistics", "В учебном сценарии транспортные компании сообщили о задержках грузов на отдельных маршрутах. Причины — загрузка терминалов и изменение графиков. Для оценки влияния нужно сопоставить затронутые направления с контрактами компании.", 1),
-    ("Расчеты с зарубежными контрагентами: новые сроки", "fx", "В учебном сценарии банки-корреспонденты увеличили время проверки трансграничных платежей. Изменения затрагивают отдельные валюты и маршруты расчетов. Применимость к конкретной компании зависит от условий ее контрактов.", 2),
-    ("Цены на металлы меняют структуру производственных затрат", "commodities", "В учебном сценарии отраслевой обзор отметил колебания цен на сталь и промышленное сырье. Передача изменения в себестоимость зависит от запасов, формул ценообразования и сроков закупок. Данные о договорах отдельных компаний отсутствуют.", 3),
-    ("Розничный спрос смещается в сторону базовых товаров", "demand", "В учебном сценарии исследование розничной торговли отмечает перераспределение потребительского спроса. Динамика отличается по категориям и регионам. Общий тренд не позволяет сделать вывод об изменении выручки конкретной компании.", 4),
-    ("Новые требования к отчетности: время проверить процессы", "regulation", "В учебном сценарии опубликован проект изменения правил отчетности для организаций. Документ находится на стадии обсуждения; обязательства пока не вступили в силу. Необходимо проверить применимость проекта к виду деятельности компании.", 5),
-    ("Конкуренция за технических специалистов усиливается", "labor", "В учебном сценарии работодатели в промышленности сообщают о сложностях найма технического персонала. Дефицит кадров может повлиять на графики производства и фонд оплаты труда. Фактическая экспозиция зависит от вакансий и кадровых планов.", 6),
-    ("Платежный календарь под давлением сезонных расчетов", "liquidity", "В учебном сценарии отраслевой обзор отмечает сезонную концентрацию платежей и потребности в оборотном капитале. Сроки входящих поступлений могут отличаться от графика обязательств. Для оценки нужен платежный календарь конкретной компании.", 7),
-    ("Депозиты и свободная ликвидность: пересмотр сроков размещения", "rates", "В учебном сценарии банки обновили предложения по депозитам для юридических лиц. Доходность зависит от срока и условий досрочного возврата. Сопоставление предложений требует учета потребностей компании в ликвидности.", 8),
-]
+DEMO_EVENTS=[(n['title'],n['topic'],n['content'],i) for i,n in enumerate(bundle()['news'])]
 
 
 def seed(db):
-    if db.get(Company, "demo-metal"):
+    if db.get(Company,'demo-metal'):
         return
-    specs = [
-        ("demo-metal", "Северный металл", "Производство металлических изделий", "Свердловская область", "25.11", 28400000000, True, False, False, "demo-industrial"),
-        ("demo-retail", "Торговый контур", "Оптовая и розничная торговля", "Москва", "46.90", 19600000000, False, True, True, None),
-        ("demo-logistics", "Вектор логистики", "Транспортировка и складское хранение", "Санкт-Петербург", "52.29", 17200000000, True, True, False, "demo-industrial"),
-    ]
-    for cid, name, industry, region, okved, revenue, loan, dep, fts, group in specs:
-        values = {"MAINOKVED_CODE": okved, "MAINOKVED_NAME": industry, "REGION": region,
-            "REVENUE_COMPANY": revenue, "CL_PRODUCT_LOA_MARK": loan, "CL_PRODUCT_DEP_MARK": dep,
-            "FTS_FLAG": fts, "FTS_COUNTRY_NAME": "Китай" if fts else None,
-            "CL_PRODUCT_RKO_MARK": True, "CL_PRODUCT_GAR_MARK": cid == "demo-metal",
-            "COMPANY_AGE_YEARS_GRADATION": "Более 10 лет", "AMOUNT_WORKERS_FNS_GRADATION": "1000–5000"}
-        db.add(Company(id=cid, name=name, industry=industry, region=region, group_id=group, synthetic=True,
-            features={k: feature(v, "Синтетический демонстрационный набор", label=k) for k, v in values.items()}))
+    data=bundle()
+    for spec in data['companies']:
+        db.add(Company(**{k:spec[k] for k in ('id','name','industry','region','group_id')},synthetic=True,
+            features={k:feature(v,'Синтетический демонстрационный набор',label=k) for k,v in spec['features'].items()}))
     db.flush()
-    for payer, recipient, amount, count in [("demo-metal", "demo-logistics", 7500000, 18),
-        ("demo-metal", "demo-retail", 2500000, 7), ("demo-retail", "demo-logistics", 4000000, 12),
-        ("demo-logistics", "demo-metal", 1200000, 3)]:
-        db.add(Link(id=digest(f"demo:{payer}:{recipient}"), kind="payment", source_id=payer,
-                    target_id=recipient, amount=amount, count=count, details={"source": "Синтетический набор"}))
-    password = hash_password(settings().demo_password)
-    db.add(User(username="demo", name="Александр Иванов", password_hash=password,
-                company_ids=[s[0] for s in specs], is_admin=True))
-    db.add(User(username="viewer", name="Наблюдатель", password_hash=password,
-                company_ids=["demo-metal"], is_admin=False))
+    for link in data['links']:
+        db.add(Link(id=digest(f"demo:{link['source_id']}:{link['target_id']}"),kind='payment',**link,
+                    details={'source':'Синтетический набор'}))
+    password=hash_password(settings().demo_password)
+    db.add(User(username='demo',name='Александр Иванов',password_hash=password,
+                company_ids=[c['id'] for c in data['companies']],is_admin=True))
+    db.add(User(username='viewer',name='Наблюдатель',password_hash=password,
+                company_ids=['demo-metal'],is_admin=False))
     db.commit()
-    for title, topic, content, age in DEMO_EVENTS:
-        import_document(db, title=title, content=content, kind="news", publisher="Учебная редакция · синтетический материал",
-                        published_at=utcnow() - timedelta(hours=age * 4 + 1), synthetic=True)
-    for title, content in [
-        ("Учебный обзор: ставки и финансирование", "СИНТЕТИЧЕСКИЙ ПРИМЕР, НЕ ПОЗИЦИЯ АЛЬФА-БАНКА. При анализе ключевой ставки следует разделять действующие кредиты с фиксированной ставкой и финансирование, условия которого могут пересматриваться. Для оценки нагрузки нужны сроки погашения, структура долга и планы инвестиций. Для депозитов важны сроки размещения и платежный календарь."),
-        ("Учебный обзор: внешняя торговля и логистика", "СИНТЕТИЧЕСКИЙ ПРИМЕР, НЕ ПОЗИЦИЯ АЛЬФА-БАНКА. Изменение сроков трансграничных расчетов и перевозок может одновременно затрагивать ликвидность и доступность товаров. При оценке нужны валюты контрактов, география маршрутов и сроки поставок. Сведения ФТС сами по себе не определяют направление внешней торговли."),
-        ("Учебный обзор: промышленность и спрос", "СИНТЕТИЧЕСКИЙ ПРИМЕР, НЕ ПОЗИЦИЯ АЛЬФА-БАНКА. Изменения спроса, цен на металлы и сырье могут по-разному влиять на производителей и торговые компании. Важно учитывать запасы, условия переноса затрат в цены, кадровые ограничения и потребности в оборотном капитале. Отраслевой тренд не заменяет анализ контрактов."),
-    ]:
-        import_document(db, title=title, content=content, kind="bank", publisher="Учебная аналитика · не материал банка",
-                        published_at=utcnow() - timedelta(days=5), synthetic=True)
+    for news in data['news']:
+        import_document(db,title=news['title'],content=news['content'],kind='news',
+            publisher='Учебная редакция · синтетический материал',
+            published_at=utcnow()-timedelta(hours=news['age_hours']),synthetic=True)
+    for bank in data['bank']:
+        import_document(db,title=bank['title'],content=bank['content'],kind='bank',
+            publisher='Учебная аналитика · не материал банка',
+            published_at=utcnow()-timedelta(days=bank['age_days']),synthetic=True)
 
 
-if __name__ == "__main__":
+if __name__=='__main__':
     with SessionLocal() as session:
         seed(session)

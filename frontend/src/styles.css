@@ -593,6 +593,12 @@ form {
   white-space: nowrap;
   margin-top: 6px;
 }
+.showcase-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 24px;
+}
+
 .selector-bar {
   background: white;
   border: 1px solid var(--border);

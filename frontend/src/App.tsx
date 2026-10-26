@@ -48,6 +48,7 @@ type Company = {
   industry: string;
   region: string;
   synthetic: boolean;
+  ready_roles?: Role[];
 };
 type Feature = {
   value: unknown;
@@ -92,6 +93,7 @@ type EventItem = {
 type SelectionStatus = { method: string; model: string; total: number; completed: number; queued: number; failed: number; not_requested: number; can_request: boolean };
 type ListSelection = { status: string; version: string; job_id: string | null; historical?: boolean; insufficient?: number };
 type FeedResponse = { items: EventItem[]; topics: Record<string, string>; selection: SelectionStatus; list_selection?: ListSelection | null;
+  personalization?: { status: string; selected_count: number; article_count: number; assessed_count: number };
   feed_version: string; total: number; next_offset: number | null; pipeline: { automatic: boolean; model_available: boolean; provider_mode: string } };
 type Evidence = {
   id: string;
@@ -114,6 +116,8 @@ type Claim = {
   assumption: boolean;
 };
 type Insight = {
+  fixture?: string;
+  fixture_notice?: string;
   headline: string;
   facts: Claim[];
   bank_view: Claim[];
@@ -1088,7 +1092,7 @@ function Analysis({
                   <div className="authorship-heading">
                     <span className="authorship-icon bank"><BookOpen size={20} /></span>
                     <div>
-                      <span className="authorship-badge bank">ИСТОЧНИК · АЛЬФА-БАНК</span>
+                      <span className="authorship-badge bank">{insight.evidence.some(e=>e.kind==='bank' && e.synthetic) ? 'УЧЕБНЫЙ ИСТОЧНИК' : 'ИСТОЧНИК · АЛЬФА-БАНК'}</span>
                       <h2 id="bank-perspective-title">{insight.evidence.some((e) => e.kind === "bank" && e.synthetic)
                         ? "Учебная аналитика банка" : "Мнение экспертов Альфа-Банка"}</h2>
                     </div>
@@ -1131,13 +1135,13 @@ function Analysis({
                   <div className="authorship-heading">
                     <span className="authorship-icon ai"><Sparkles size={20} /></span>
                     <div>
-                      <span className="authorship-badge ai">{insight.mode === "demo" ? "ДЕМО · АНАЛИТИЧЕСКИЕ ПРАВИЛА" : "AI · ПЕРСОНАЛЬНЫЙ АНАЛИЗ"}</span>
+                      <span className="authorship-badge ai">{insight.fixture ? "ГОТОВЫЙ УЧЕБНЫЙ ПРИМЕР" : insight.mode === "demo" ? "ДЕМО · АНАЛИТИЧЕСКИЕ ПРАВИЛА" : "AI · ПЕРСОНАЛЬНЫЙ АНАЛИЗ"}</span>
                       <h2 id="ai-perspective-title">{insight.mode === "demo" ? "Сценарии для вашей компании" : "Выводы AI для вашей компании"}</h2>
                     </div>
                   </div>
-                  <p className="authorship-description">{insight.mode === "demo"
+                  <p className="authorship-description">{insight.fixture_notice || (insight.mode === "demo"
                     ? "Сценарии сформированы правилами без вызова модели."
-                    : "AI сопоставляет новость, материалы банка и профиль компании. Это сценарии и предложения модели, не мнение экспертов банка."}</p>
+                    : "AI сопоставляет новость, материалы банка и профиль компании. Это сценарии и предложения модели, не мнение экспертов банка.")}</p>
                   <section className="panel impact-panel">
                     <h3>Влияние на ваш бизнес</h3>
                     <Claims claims={insight.impact} insight={insight} onSource={onSource} />
@@ -1423,6 +1427,29 @@ function BankLibrary({ onSource }: { onSource: (id: string) => void }) {
   return <><p className="muted">Дата материала — граница актуальности позиции банка. Сканы распознаны локально; оригинал доступен для сверки.</p>{error && <ErrorBox error={error} />}<div className="sources-grid">{items.map((item) => <div className="panel source-card" key={item.id}><span className="overline">{item.synthetic ? "УЧЕБНЫЙ ПРИМЕР" : "АЛЬФА-БАНК"}</span><h3>{item.title}</h3><p className="muted small">{item.date_kind === "observed_at" ? "Загружен " : ""}{new Date(item.published_at).toLocaleDateString("ru-RU")} · {item.pages || "—"} стр. · {item.extraction === "ocr" ? "OCR" : "Текст"}</p><button className="text-button" onClick={() => onSource(item.id)}>Открыть материал <ArrowUpRight size={15} /></button></div>)}</div></>;
 }
 
+function Showcase({onOpen}: {onOpen: (id: string) => Promise<void>}) {
+  const [data,setData]=useState<{notice:string;items:{id:string;company_id:string;company_name:string;role:Role;title:string}[]} | null>(null);
+  const [error,setError]=useState('');
+  const [opening,setOpening]=useState<string | null>(null);
+  useEffect(()=>{api<NonNullable<typeof data>>('/examples').then(setData).catch(e=>setError(e.message));},[]);
+  if(error) return <ErrorBox error={error} />;
+  if(!data) return <Spinner text="Загружаем примеры…" />;
+  return <>
+    <div className="panel"><h2>Можно посмотреть без ключа LLM</h2><p>{data.notice}</p>
+      <p>Компании, новости и банковские обзоры вымышлены. Раздел банка демонстрирует формат и не является позицией Альфа-Банка. Для каждой роли заранее подготовлен отдельный сценарий с источниками.</p></div>
+    {!data.items.length && <p>Для доступных вам компаний учебные примеры не установлены.</p>}
+    <div className="library-grid">{[...new Set(data.items.map(i=>i.company_id))].map(company=>{
+      const rows=data.items.filter(i=>i.company_id===company);
+      return <div key={company} className="panel library-card"><span className="overline">УЧЕБНЫЙ ПРИМЕР</span>
+        <h3>{rows[0].company_name}</h3><p>{rows[0].title}</p>
+        <div className="showcase-actions">{rows.map(row=><button key={row.id} className="text-button" disabled={opening!==null} onClick={async()=>{
+          setOpening(row.id);try{await onOpen(row.id);}finally{setOpening(null);}
+        }}>Открыть разбор · {row.role==='TREASURER'?'Казначей':row.role} <ArrowUpRight size={15}/></button>)}</div>
+      </div>;
+    })}</div>
+  </>;
+}
+
 export default function App() {
   const [corpus, setCorpus] = useState<"real" | "synthetic">("real");
   const [feedStatus, setFeedStatus] = useState<FeedStatus | null>(null);
@@ -1471,9 +1498,11 @@ export default function App() {
           pendingLinkedRun.current = linked;
           setCompanies(c);
           if (linked) setRole(linked.role);
-          setCompanyId((id) =>
-            linked?.company_id || (c.some((v) => v.id === id) ? id : c[0]?.id || ""),
-          );
+          const chosen = c.find(v => v.id === (linked?.company_id || companyId))
+            || c.find(v => !v.synthetic && v.ready_roles?.includes(role))
+            || c.find(v => v.synthetic) || c[0];
+          if (chosen && (linked || chosen.id !== companyId)) setCorpus(chosen.synthetic ? 'synthetic' : 'real');
+          setCompanyId(chosen?.id || '');
         }
       })
       .catch((e) => setError(e.message));
@@ -1581,6 +1610,16 @@ export default function App() {
       setError((e as Error).message);
     }
   }
+  async function openExample(id: string) {
+    setError('');
+    try {
+      const opened = await post<{run_id:string}>(`/examples/${encodeURIComponent(id)}/open`);
+      const run = await api<Run>(`/runs/${opened.run_id}`);
+      pendingLinkedRun.current = run;
+      setCompanyId(run.company_id); setRole(run.role); setCorpus('synthetic');
+      setSearch(''); setTopic(''); setFeedScope('personal'); setPage('feed'); setRunId(run.id);
+    } catch (e) { setError((e as Error).message); }
+  }
   async function openSource(id: string) {
     setSourceBusy(true);
     try {
@@ -1616,6 +1655,8 @@ export default function App() {
     );
   if (!user) return <Login onLogin={setUser} />;
   const filtered = items;
+  const unprocessed = corpus === 'real' && ['not_processed', 'processing', 'failed'].includes(feedMeta?.personalization?.status || '');
+  const preparedCompany = companies.find(c=>!c.synthetic && c.id!==companyId && c.ready_roles?.includes(role));
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -1638,6 +1679,7 @@ export default function App() {
             Контекст компании
           </button>
           <button className={page === "library" ? "active" : ""} onClick={() => navigate("library")}><BookOpen size={19} />Аналитика банка</button>
+          <button className={page === "examples" ? "active" : ""} onClick={() => navigate("examples")}><FlaskConical size={19} />Готовые примеры</button>
           {user.is_admin && (
             <>
               <div className="workspace-label">РАБОТА С ДАННЫМИ</div>
@@ -1703,7 +1745,7 @@ export default function App() {
                   : page === "context"
                     ? "Контекст компании"
                     : page === "import"
-                      ? "Источники и данные" : page === "library" ? "Аналитика банка"
+                      ? "Источники и данные" : page === "library" ? "Аналитика банка" : page === 'examples' ? 'Готовые примеры'
                       : "Качество и бюджет"}
               </h1>
               <p className="muted">
@@ -1714,6 +1756,7 @@ export default function App() {
                     : page === "import"
                       ? "Добавляйте материалы и проверяйте анализ на новых событиях."
                       : page === "library" ? "Исследования банка, даты и оригиналы для проверки оснований."
+                      : page === 'examples' ? 'Три компании и три роли. Разборы с источниками доступны без подключения модели.'
                       : "Прозрачность работы сервиса и обратная связь пользователей."}
               </p>
             </div>
@@ -1728,7 +1771,7 @@ export default function App() {
               </button>
             )}
           </div>
-          <div className="selector-bar">
+          {page !== 'examples' && <div className="selector-bar">
             <div className="select-company">
               <Building2 size={19} />
               <label>
@@ -1736,11 +1779,15 @@ export default function App() {
                 <select
                   aria-label="Компания"
                   value={companyId}
-                  onChange={(e) => setCompanyId(e.target.value)}
+                  onChange={(e) => {
+                    const chosen=companies.find(c=>c.id===e.target.value);
+                    setCompanyId(e.target.value); setCorpus(chosen?.synthetic ? 'synthetic' : 'real');
+                    setSearch(''); setTopic('');
+                  }}
                 >
                   {companies.map((c) => (
                     <option key={c.id} value={c.id}>
-                      {c.name}
+                      {c.name}{c.synthetic ? ' · учебная' : !c.ready_roles?.length ? ' · подборка не готова' : ''}
                     </option>
                   ))}
                 </select>
@@ -1767,6 +1814,7 @@ export default function App() {
                 : "Контекст клиента"}
             </span>
           </div>
+          }
           {page === "feed" &&
             (runId ? (
               <Analysis
@@ -1839,9 +1887,9 @@ export default function App() {
                   <div className="overview-metrics">
                     <div>
                       <strong>
-                        {(feedMeta?.total ?? items.length).toString().padStart(2, "0")}
+                        {unprocessed && feedScope === 'personal' ? '—' : (feedMeta?.total ?? items.length).toString().padStart(2, "0")}
                       </strong>
-                      <span>{search.trim() ? "публикаций найдено" : "событий в контексте"}</span>
+                      <span>{unprocessed && feedScope === 'personal' ? 'подборка ещё не готова' : search.trim() ? "публикаций найдено" : "событий в контексте"}</span>
                     </div>
                     <div>
                       <strong>
@@ -1998,11 +2046,18 @@ export default function App() {
                     ) : (
                       <div className="panel empty">
                         <Search size={30} />
-                        <h3>Пока нет подходящих событий</h3>
+                        <h3>{unprocessed && feedScope === 'personal' ? 'Подборка для этой компании ещё не подготовлена' : search || topic ? 'Нет событий по этим фильтрам' : feedMeta?.personalization?.status === 'no_sources' ? 'Новости ещё не загружены' : 'Среди проверенных новостей пока нет подходящих событий'}</h3>
                         <p>
-                          В персональную ленту попадают новости с применимой связью с профилем и ролью.
-                          Измените фильтр или переключитесь на все материалы. Поиск учитывает полный сохранённый текст.
+                          {unprocessed && feedScope === 'personal'
+                            ? `Новости загружены, но проверенных оценок для выбранного профиля пока нет. Это не означает, что все новости нерелевантны. ${feedMeta?.pipeline.automatic ? 'Дождитесь завершения обработки.' : 'Для нового отбора нужно подключить модель. Готовые учебные примеры доступны уже сейчас.'}`
+                            : 'В персональную ленту попадают проверенные новости с применимой связью с профилем и ролью. Необработанные материалы не считаются нерелевантными.'}
                         </p>
+                        {(search || topic) && <button className="text-button" onClick={()=>{setSearch('');setTopic('');}}>Сбросить поиск и тему</button>}
+                        {feedScope === 'personal' && <button className="text-button" onClick={()=>setFeedScope('all')}>Показать все материалы</button>}
+                        {unprocessed && preparedCompany && <button className="text-button" onClick={()=>{
+                          setCompanyId(preparedCompany.id);setCorpus('real');setSearch('');setTopic('');setFeedScope('personal');
+                        }}>Перейти к готовой подборке</button>}
+                        <button className="text-button" onClick={()=>navigate('examples')}>Открыть готовые примеры</button>
                       </div>
                     )}
                     {feedMeta?.next_offset != null && <button className="text-button" disabled={moreBusy} onClick={() => void loadMore()}>{moreBusy ? "Загружаем…" : `Показать ещё · ${items.length} из ${feedMeta.total}`}</button>}
@@ -2018,6 +2073,7 @@ export default function App() {
               <ContextPanel context={context} detailed />
             </div>
           )}
+          {page === 'examples' && <Showcase onOpen={openExample} />}
           {page === "import" && user.is_admin && (
             <ImportPanel onChange={() => setRevision((r) => r + 1)} />
           )}

@@ -125,8 +125,39 @@ def me(user: User = Depends(current_user)):
 
 @app.get("/api/companies")
 def companies(user: User = Depends(current_user), db: Session = Depends(get_db)):
-    return [{"id": c.id, "name": c.name, "industry": c.industry, "region": c.region, "synthetic": c.synthetic}
-            for c in db.scalars(select(Company).where(Company.id.in_(user.company_ids))).all()]
+    result=[]
+    for c in db.scalars(select(Company).where(Company.id.in_(user.company_ids))).all():
+        ctx_key=fingerprint(company_context(db,c,user.company_ids))
+        rows=[r for r in db.scalars(select(RelevanceAssessment).where(RelevanceAssessment.company_id==c.id,
+            RelevanceAssessment.context_key==ctx_key,RelevanceAssessment.version==SELECTION_VERSION,
+            RelevanceAssessment.model_id==settings().llm_analysis_id)) if r.cache_key==assessment_key(r.article_key,ctx_key)]
+        ready_roles=[role for role in ('CEO','CFO','TREASURER') if any(feed_ranking(r,role)['eligible'] for r in rows)]
+        # A complete reviewed list supersedes preliminary grades, including an empty list.
+        if db.scalar(select(RankingJob.id).where(RankingJob.company_id==c.id,RankingJob.status=='completed',
+                RankingJob.payload['purpose'].as_string()=='full_feed').limit(1)):
+            from . import full_selection
+            payload=full_selection.from_database(db,user,c)
+            entries=[{'id':a['event_id'],'score':0} for a in payload['articles']]
+            for role in ('CEO','CFO','TREASURER'):
+                selected,_=full_selection.apply_cached(db,c.id,payload,entries,role)
+                if selected is not None:
+                    ready_roles=[r for r in ready_roles if r!=role]
+                    if selected:ready_roles.append(role)
+        result.append({"id":c.id,"name":c.name,"industry":c.industry,"region":c.region,
+                       "synthetic":c.synthetic,"ready_roles":ready_roles})
+    return result
+
+
+@app.get('/api/examples')
+def examples(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    from .showcase import available_examples
+    return available_examples(db,user)
+
+
+@app.post('/api/examples/{example_id}/open')
+def show_example(example_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    from .showcase import open_example
+    return open_example(db,user,example_id)
 
 
 @app.get("/api/companies/{company_id}/context")
@@ -216,6 +247,17 @@ def feed(company_id: str, role: Role = "CFO", topic: str | None = None, corpus: 
             items=complete;list_selection=full_state;ordering_version=full_selection.VERSION
         elif full_state['status']!='not_requested':
             list_selection=full_state
+    selected_count=len(items)
+    if not events:personal_status='no_sources'
+    elif corpus=='synthetic' or (list_selection and list_selection['status']=='completed' and not list_selection.get('historical')):
+        personal_status='ready'
+    elif selection_counts['completed']:
+        personal_status='ready' if selection_counts['completed']==len(events) else 'partial'
+    elif selection_counts['queued'] or (list_selection and list_selection['status'] in ('queued','running')):
+        personal_status='processing'
+    elif selection_counts['failed'] or (list_selection and list_selection['status']=='failed'):
+        personal_status='failed'
+    else:personal_status='not_processed'
     if search_scope=='all':
         ordered_ids={e['id'] for e in items}
         items=items+[e for e in entries if e['id'] not in ordered_ids]
@@ -226,6 +268,8 @@ def feed(company_id: str, role: Role = "CFO", topic: str | None = None, corpus: 
         items=[item for item in items if item['id'] in matched]
     payload={"items": items, "topics": TOPIC_NAMES, "company_id": company_id, "role": role, "corpus": corpus,
             'scope':search_scope,
+            'personalization':{'status':personal_status,'selected_count':selected_count,
+                               'article_count':len(events),'assessed_count':selection_counts['completed']},
             "ranking_version":SELECTION_VERSION if corpus=='real' else RANKING_VERSION,
             "ordering_version":ordering_version,"list_selection":list_selection,
             "selection":{'method':'llm' if corpus=='real' else 'demo_rules','model':settings().llm_analysis_id,

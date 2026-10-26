@@ -57,6 +57,9 @@ Synthetic datasets and simulated integrations:
 
 Current serving paths (2026-10-26): real-news selection and semantic merging use
 reviewed LLM outputs; lexical similarity proposes candidates only. Synthetic demo
-interpretations use explicit rules. Historical DeepSeek responses remain labelled
+interpretations use explicit rules or labelled, prewritten examples from
+backend/fixtures/showcase-v1.json. All bundled companies, news and research in that
+fixture are synthetic; it contains no actual bank research or provider responses.
+Historical DeepSeek responses remain labelled
 as historical; local-model quality has not yet been evaluated. AI-created relevance
 labels are internal development material, not independent expert certification.
