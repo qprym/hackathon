@@ -1,12 +1,13 @@
 """Local-only automatic source -> assessments -> complete feed reconciliation."""
 from sqlalchemy import select
-from .config import settings
+from .config import settings,settings_scope
 from .db import SessionLocal, utcnow
 from .models import Company, Event, User, FeedState, RankingJob
 from .semantic_ranking import enqueue as enqueue_assessments, fingerprint
 from .full_selection import enqueue as enqueue_feed, from_database, cached_job
 
 
+@settings_scope()
 def schedule():
     cfg=settings()
     # Remote trials remain explicitly initiated. This scheduler cannot spend their allowance.

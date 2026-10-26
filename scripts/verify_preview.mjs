@@ -38,6 +38,18 @@ try {
   }
   await page.evaluate(()=>window.scrollTo(0,0));
   await page.screenshot({path:'tmp/preview-audit/feed.png',fullPage:true});
+  const topicButtons=page.getByLabel('Темы новостей',{exact:true});
+  const topicNames=await topicButtons.getByRole('button').allTextContents();
+  await Promise.all([page.waitForResponse(r=>r.url().includes('/api/feed?')&&new URL(r.url()).searchParams.get('topic')==='liquidity'),topicButtons.getByRole('button',{name:'Ликвидность',exact:true}).click()]);
+  await expect(page.locator('.event-card').first()).toBeVisible();
+  expect(await topicButtons.getByRole('button').allTextContents()).toEqual(topicNames);
+  await Promise.all([page.waitForResponse(r=>r.url().includes('/api/feed?')&&!new URL(r.url()).searchParams.get('topic')),topicButtons.getByRole('button',{name:'Все события',exact:true}).click()]);
+  await expect(page.locator('.event-card').first()).toBeVisible();
+  expect(await topicButtons.getByRole('button').allTextContents()).toEqual(topicNames);
+  await page.getByRole('button',{name:'Настройки LLM',exact:true}).click();
+  await expect(page.getByLabel('Токен API',{exact:true})).toHaveAttribute('type','password');
+  await expect(page.getByLabel('Токен API',{exact:true})).toHaveValue('');
+  await page.screenshot({path:'tmp/preview-audit/llm-settings.png',fullPage:true});
   await page.getByRole('button',{name:'Контекст компании',exact:true}).click();
   await expect(page.getByRole('heading',{name:'Поиск по всем платёжным связям'})).toBeVisible();
   await page.getByRole('button',{name:'Новостная аналитика',exact:true}).click();

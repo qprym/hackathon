@@ -49,13 +49,15 @@ services:
       LLM_CONTEXT_CHARACTERS: ${LLM_CONTEXT_CHARACTERS:-120000}
       LLM_MODEL_REVISION: ${LLM_MODEL_REVISION:-}
       JOB_LEASE_SECONDS: ${JOB_LEASE_SECONDS:-90}
+      LLM_SETTINGS_PATH: /app/runtime/llm.json
     command: ["alembic", "upgrade", "head"]
     depends_on:
       db: {condition: service_healthy}
   api:
     build: ./backend
+    extra_hosts: ["host.docker.internal:host-gateway"]
     environment: *app-env
-    volumes: ["source_files:/app/uploads"]
+    volumes: ["source_files:/app/uploads", "runtime_settings:/app/runtime"]
     depends_on:
       migrate: {condition: service_completed_successfully}
     healthcheck:
@@ -66,8 +68,9 @@ services:
     restart: unless-stopped
   worker:
     build: ./backend
+    extra_hosts: ["host.docker.internal:host-gateway"]
     environment: *app-env
-    volumes: ["source_files:/app/uploads"]
+    volumes: ["source_files:/app/uploads", "runtime_settings:/app/runtime"]
     command: ["python", "-m", "app.worker"]
     depends_on:
       api: {condition: service_healthy}
@@ -81,3 +84,4 @@ services:
 volumes:
   postgres_data:
   source_files:
+  runtime_settings:

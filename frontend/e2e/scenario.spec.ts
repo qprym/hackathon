@@ -49,13 +49,14 @@ test("unseen news is imported, analyzed and receives feedback", async ({ page })
   await page.getByLabel("Заголовок", { exact: true }).fill(title);
   await page.getByLabel("Издатель", { exact: true }).fill("Учебная редакция · проверка");
   await page.getByLabel("Полный текст", { exact: true }).fill(
-    "Синтетическое событие: контрагенты пересматривают сроки авансовых платежей. Для оценки оборотного капитала нужны договоры, графики обязательств и календарь расчетов компании.",
+    `Синтетическое событие: контрагенты пересматривают сроки авансовых платежей. Для оценки оборотного капитала нужны договоры, графики обязательств и календарь расчетов компании. Проверочный экземпляр: ${title}.`,
   );
   await expect(page.getByLabel("Синтетический материал для демонстрации")).toBeChecked();
   await page.getByRole("button", { name: "Загрузить и обработать" }).click();
   await expect(page.getByRole("heading", { name: "Результат обработки" })).toBeVisible();
   await page.getByRole("button", { name: "Новостная аналитика", exact: true }).click();
   await page.getByRole("button", { name: "Учебные события", exact: true }).click();
+  await page.getByLabel("Поиск по ленте", { exact: true }).fill(title);
   await page.getByRole("button", { name: title, exact: true }).click();
   await expect(page.getByRole("heading", { name: "Влияние на ваш бизнес", exact: true })).toBeVisible({ timeout: 30000 });
   await page.getByRole("button", { name: "Полезно", exact: true }).click();

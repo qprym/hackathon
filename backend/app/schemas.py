@@ -15,6 +15,7 @@ class FeedPage(BaseModel):
     list_selection: dict | None = Field(default=None,description='Состояние обработки и версия полного отбора')
     pipeline: dict = Field(default_factory=dict,description='Автоматическая обработка и доступность настроенной модели')
     personalization: dict = Field(default_factory=dict,description='Готовность персонализации независимо от фильтров; not_processed не означает нерелевантность')
+    available_topics: list[str] = Field(default_factory=list,description='Темы всей подборки до поиска, тематического фильтра и пагинации')
 
 
 class Login(BaseModel):

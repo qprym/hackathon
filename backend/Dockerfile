@@ -4,6 +4,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends poppler-utils tesseract-ocr tesseract-ocr-rus tesseract-ocr-eng && rm -rf /var/lib/apt/lists/*
 COPY requirements.lock ./requirements.lock
 RUN pip install --no-cache-dir -r requirements.lock && useradd --create-home app && mkdir /app/uploads && chown app:app /app/uploads
+RUN mkdir /app/runtime && chown app:app /app/runtime && chmod 700 /app/runtime
 COPY --chown=app:app . .
 USER app
 EXPOSE 8000

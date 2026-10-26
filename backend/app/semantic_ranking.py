@@ -11,7 +11,7 @@ from datetime import timedelta
 from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, StrictInt
 from sqlalchemy import select, update
-from .config import settings
+from .config import settings,settings_scope
 from .context import company_context
 from .db import SessionLocal, utcnow
 from .llm import ModelUnavailable, complete_json
@@ -206,6 +206,7 @@ def fail_job(db,job,message):
     db.commit()
 
 
+@settings_scope()
 def process_one(job_id=None,*,defer_review=False):
     if settings().demo_mode:return False
     with SessionLocal() as db:

@@ -24,9 +24,11 @@ try {
         }
         & npx playwright install chromium --only-shell
         if ($LASTEXITCODE -ne 0) { throw 'Browser installation failed' }
-        & npm run test:e2e
+        & npm run test:e2e -- --workers=1
         if ($LASTEXITCODE -ne 0) { throw 'Browser acceptance failed' }
     } finally { Pop-Location }
+    & (Join-Path $taskRoot '.venv/Scripts/python.exe') scripts/verify_settings.py --project $taskProject
+    if ($LASTEXITCODE -ne 0) { throw 'Settings persistence check failed' }
     & (Join-Path $taskRoot '.venv/Scripts/python.exe') scripts/verify_recovery.py --project $taskProject
     if ($LASTEXITCODE -ne 0) { throw 'Queue recovery check failed' }
     & (Join-Path $taskRoot '.venv/Scripts/python.exe') scripts/verify_backup.py --project $taskProject

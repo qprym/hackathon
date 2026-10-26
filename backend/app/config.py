@@ -2,6 +2,11 @@ from functools import lru_cache
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
 from typing import Literal
+from contextlib import contextmanager
+from contextvars import ContextVar
+from pathlib import Path
+import hashlib
+import json
 
 
 APPROVED_MODELS = {
@@ -47,8 +52,64 @@ class Settings(BaseSettings):
     # Technical envelope, including instructions/schema. Never truncate a source to fit.
     llm_context_characters: int = Field(default=120000, ge=4000)
     job_lease_seconds: int = Field(default=90, ge=10)
+    llm_settings_path: str = '.runtime/llm.json'
 
 
 @lru_cache
-def settings():
+def environment_settings():
     return Settings()
+
+
+RUNTIME_FIELDS = frozenset({
+    'demo_mode','preview_cached_only','neural_ranking_worker','auto_personalization','active_company_ids',
+    'llm_base_url','llm_provider_mode','llm_api_key','llm_local_api_key','llm_analysis_model','llm_analysis_id',
+    'llm_extraction_model','llm_extraction_id','llm_timeout_seconds','llm_context_characters','llm_model_revision',
+    'llm_input_rub_per_million','llm_output_rub_per_million','llm_daily_limit_rub','llm_request_limit','llm_test_limit_rub',
+})
+_pinned = ContextVar('llm_settings_snapshot', default=None)
+
+class SettingsUnavailable(RuntimeError):
+    pass
+
+
+def runtime_document():
+    try:
+        raw=Path(environment_settings().llm_settings_path).read_text(encoding='utf8')
+    except FileNotFoundError:return None
+    except OSError:raise SettingsUnavailable('Не удалось прочитать настройки LLM.') from None
+    try:
+        doc=json.loads(raw)
+        if doc.get('version')!=1 or not isinstance(doc.get('revision'),str) or not isinstance(doc.get('overrides'),dict):
+            raise ValueError()
+        if set(doc['overrides'])-RUNTIME_FIELDS:raise ValueError()
+        return doc
+    except (ValueError,TypeError,AttributeError):
+        raise SettingsUnavailable('Сохранённые настройки LLM повреждены; требуется восстановить файл настроек.') from None
+
+
+@lru_cache(maxsize=4)
+def _resolved(base_json,document_json):
+    try:
+        cfg=Settings.model_validate(json.loads(base_json) | json.loads(document_json)['overrides'])
+    except ValueError:
+        raise SettingsUnavailable('Сохранённые настройки LLM не прошли проверку.') from None
+    if not cfg.demo_mode:
+        identity=[cfg.llm_provider_mode,cfg.llm_base_url,cfg.llm_analysis_model,cfg.llm_analysis_id,
+                  cfg.llm_extraction_model,cfg.llm_extraction_id,cfg.llm_model_revision]
+        cfg.llm_model_revision='connection-'+hashlib.sha256(json.dumps(identity).encode()).hexdigest()[:20]
+    return cfg
+
+
+def settings():
+    pinned=_pinned.get()
+    if pinned is not None:return pinned
+    base=environment_settings();doc=runtime_document()
+    return _resolved(base.model_dump_json(),json.dumps(doc,sort_keys=True)) if doc else base
+
+
+@contextmanager
+def settings_scope():
+    # An in-flight analysis uses one endpoint, credential and tariff snapshot throughout.
+    token=_pinned.set(settings().model_copy(deep=True))
+    try:yield
+    finally:_pinned.reset(token)

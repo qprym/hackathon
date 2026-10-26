@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
+import LlmSettings from './LlmSettings';
 import {
   ArrowDownLeft,
   ArrowLeft,
@@ -25,6 +26,7 @@ import {
   Plus,
   RefreshCw,
   Search,
+  Settings as SettingsIcon,
   Send,
   ShieldCheck,
   Sparkles,
@@ -93,6 +95,7 @@ type EventItem = {
 type SelectionStatus = { method: string; model: string; total: number; completed: number; queued: number; failed: number; not_requested: number; can_request: boolean };
 type ListSelection = { status: string; version: string; job_id: string | null; historical?: boolean; insufficient?: number };
 type FeedResponse = { items: EventItem[]; topics: Record<string, string>; selection: SelectionStatus; list_selection?: ListSelection | null;
+  available_topics: string[];
   personalization?: { status: string; selected_count: number; article_count: number; assessed_count: number };
   feed_version: string; total: number; next_offset: number | null; pipeline: { automatic: boolean; model_available: boolean; provider_mode: string } };
 type Evidence = {
@@ -1471,6 +1474,7 @@ export default function App() {
     [topics, setTopics] = useState<Record<string, string>>({}),
     [topic, setTopic] = useState(""),
     [search, setSearch] = useState("");
+  const [availableTopics,setAvailableTopics]=useState<string[]>([]);
   const [page, setPage] = useState("feed"),
     [runId, setRunId] = useState<string | null>(null),
     [busy, setBusy] = useState(false),
@@ -1534,6 +1538,7 @@ export default function App() {
           setContext(c);
           setItems(f.items);
           setTopics(f.topics);
+          setAvailableTopics(f.available_topics || Object.keys(f.topics));
           setSelection(f.selection);
           setListSelection(f.list_selection ?? null);
           setFeedMeta(f); currentFeed.current = f.feed_version;
@@ -1683,6 +1688,7 @@ export default function App() {
           {user.is_admin && (
             <>
               <div className="workspace-label">РАБОТА С ДАННЫМИ</div>
+              <button className={page==='settings'?'active':''} onClick={()=>navigate('settings')}><SettingsIcon size={19}/>Настройки LLM</button>
               <button
                 className={page === "import" ? "active" : ""}
                 onClick={() => navigate("import")}
@@ -1722,7 +1728,7 @@ export default function App() {
             <span className="small muted">
               {user.mode === "demo"
                 ? "Демонстрационный режим"
-                : "Модели подключены"}
+                : "LLM включена"}
             </span>
             <div className="avatar">
               {user.name
@@ -1745,7 +1751,7 @@ export default function App() {
                   : page === "context"
                     ? "Контекст компании"
                     : page === "import"
-                      ? "Источники и данные" : page === "library" ? "Аналитика банка" : page === 'examples' ? 'Готовые примеры'
+                      ? "Источники и данные" : page === "library" ? "Аналитика банка" : page === 'examples' ? 'Готовые примеры' : page==='settings' ? 'Настройки LLM'
                       : "Качество и бюджет"}
               </h1>
               <p className="muted">
@@ -1757,6 +1763,7 @@ export default function App() {
                       ? "Добавляйте материалы и проверяйте анализ на новых событиях."
                       : page === "library" ? "Исследования банка, даты и оригиналы для проверки оснований."
                       : page === 'examples' ? 'Три компании и три роли. Разборы с источниками доступны без подключения модели.'
+                      : page === 'settings' ? 'Адрес сервера, токен и модель для разбора новостей.'
                       : "Прозрачность работы сервиса и обратная связь пользователей."}
               </p>
             </div>
@@ -1771,7 +1778,7 @@ export default function App() {
               </button>
             )}
           </div>
-          {page !== 'examples' && <div className="selector-bar">
+          {!['examples','settings'].includes(page) && <div className="selector-bar">
             <div className="select-company">
               <Building2 size={19} />
               <label>
@@ -1926,7 +1933,7 @@ export default function App() {
                       <button className={feedScope === "all" ? "active" : ""} onClick={() => setFeedScope("all")}>Все материалы</button>
                     </div>
                     {feedScope === "all" && <p className="muted small">Здесь также есть неоценённые и нерелевантные компании материалы. Их статус указан в карточке.</p>}
-                    <div className="filters">
+                    <div className="filters" aria-label="Темы новостей">
                       <button
                         className={!topic ? "active" : ""}
                         onClick={() => setTopic("")}
@@ -1935,7 +1942,7 @@ export default function App() {
                       </button>
                       {Object.entries(topics)
                         .filter(([t]) =>
-                          items.some((i) => i.topics.includes(t)),
+                          availableTopics.includes(t) || t === topic,
                         )
                         .map(([t, name]) => (
                           <button
@@ -2078,6 +2085,9 @@ export default function App() {
             <ImportPanel onChange={() => setRevision((r) => r + 1)} />
           )}
           {page === "metrics" && user.is_admin && <MetricsPanel />}
+          {page === 'settings' && user.is_admin && <LlmSettings request={api} onSaved={()=>{
+            void api<User>('/auth/me').then(setUser);setRevision(r=>r+1);
+          }}/>}
           {page === "library" && <BankLibrary onSource={openSource} />}
           <footer className="footer">
             <span>Альфа · Контекст</span>

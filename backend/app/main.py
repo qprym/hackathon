@@ -11,7 +11,10 @@ from fastapi.responses import JSONResponse, FileResponse
 from sqlalchemy import func, or_, select, text
 from sqlalchemy.orm import Session
 from .auth import admin, authorize_company, current_user, make_session, token_hash, verify_password
-from .config import settings
+from .config import settings,settings_scope,SettingsUnavailable
+from .llm_settings import ConnectionInput,public_settings,save_settings,reset_settings
+from fastapi.exceptions import RequestValidationError
+from fastapi.exception_handlers import request_validation_exception_handler
 from .context import company_context
 from .db import SessionLocal, engine, get_db, initialize_development_schema, utcnow
 from .ingestion import FEEDS, extract_pdf, import_csv, import_document
@@ -81,6 +84,42 @@ async def browser_safety(request, call_next):
 def health(db: Session = Depends(get_db)):
     db.execute(text("SELECT 1"))
     return {"status": "ok", "mode": "demo" if settings().demo_mode else "live", "version": "0.1.0"}
+
+
+@app.middleware('http')
+async def configuration_snapshot(request,call_next):
+    try:
+        with settings_scope():return await call_next(request)
+    except SettingsUnavailable:
+        return JSONResponse({'detail':'Не удалось прочитать серверные настройки LLM.'},status_code=503)
+
+
+@app.exception_handler(RequestValidationError)
+async def redact_settings_validation(request,exc):
+    if request.url.path.startswith('/api/admin/llm-settings'):
+        fields=sorted({str(part) for err in exc.errors() for part in err['loc'] if part in ConnectionInput.model_fields})
+        return JSONResponse({'detail':'Проверьте формат и значения полей настроек'+(': '+', '.join(fields) if fields else '')+'.'},status_code=422)
+    return await request_validation_exception_handler(request,exc)
+
+
+@app.get('/api/admin/llm-settings')
+def get_llm_settings(user:User=Depends(admin)):
+    return public_settings()
+
+
+@app.post('/api/admin/llm-settings')
+def update_llm_settings(body:ConnectionInput,user:User=Depends(admin),db:Session=Depends(get_db)):
+    try:return save_settings(db,user,body)
+    except OSError:raise HTTPException(503,'Не удалось сохранить настройки в серверном хранилище.') from None
+
+
+class SettingsRevision(BaseModel):
+    revision:str=Field(max_length=100)
+
+
+@app.post('/api/admin/llm-settings/reset')
+def restore_llm_environment(body:SettingsRevision,user:User=Depends(admin),db:Session=Depends(get_db)):
+    return reset_settings(db,user,body.revision)
 
 
 def user_info(user):
@@ -261,12 +300,15 @@ def feed(company_id: str, role: Role = "CFO", topic: str | None = None, corpus: 
     if search_scope=='all':
         ordered_ids={e['id'] for e in items}
         items=items+[e for e in entries if e['id'] not in ordered_ids]
+    # Facets describe the complete scoped collection, not the current page or selected topic.
+    available_topics=[key for key in TOPIC_NAMES if any(key in item['topics'] for item in items)]
     if topic:items=[item for item in items if topic in item['topics']]
     if q.strip():
         needle=q.strip().casefold()
         matched={e.id for e in events if needle in e.title.casefold() or any(needle in documents[k].content.casefold() for k in e.document_ids if k in documents)}
         items=[item for item in items if item['id'] in matched]
     payload={"items": items, "topics": TOPIC_NAMES, "company_id": company_id, "role": role, "corpus": corpus,
+            'available_topics':available_topics,
             'scope':search_scope,
             'personalization':{'status':personal_status,'selected_count':selected_count,
                                'article_count':len(events),'assessed_count':selection_counts['completed']},
@@ -384,6 +426,9 @@ def create_run(db, user, body, question=None, parent=None, single_pass=False):
     run = Run(user_id=user.id, company_id=company.id, event_id=event.id, role=body.role,
               question=question, parent_id=parent, cache_key=key, access_scope=access_scope)
     run.trace=[{'step':'Состав события','at':utcnow().isoformat()+'Z','details':{'document_ids':source_ids}}]
+    run.trace.append({'step':'Снимок конфигурации','at':utcnow().isoformat()+'Z','details':{
+        'mode':'demo' if settings().demo_mode else 'live','revision':settings().llm_model_revision,
+        'model':settings().llm_analysis_id,'provider':settings().llm_provider_mode}})
     if single_pass:
         run.trace = [{'step': 'Режим пересчёта', 'at': utcnow().isoformat() + 'Z', 'details': {'max_attempts': 1,
             'note': 'Свежий поиск, один синтез и независимая проверка; максимум два обращения без платных повторов.'}}] + run.trace

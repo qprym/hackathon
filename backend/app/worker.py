@@ -2,7 +2,7 @@ import logging
 import threading
 from sqlalchemy import select, update
 from .agent import run_agent
-from .config import settings
+from .config import settings,settings_scope
 from .db import SessionLocal, utcnow
 from .llm import ModelUnavailable
 from .models import Audit, Run, uid
@@ -33,6 +33,7 @@ def claim_job(db):
     return job
 
 
+@settings_scope()
 def process_one():
     with SessionLocal() as db:
         run = claim_job(db)
@@ -40,6 +41,11 @@ def process_one():
             return False
         run_id, lease_token = run.id, run.lease_token
         try:
+            expected=next((s['details'] for s in run.trace if s['step']=='Снимок конфигурации'),None)
+            current={'mode':'demo' if settings().demo_mode else 'live','revision':settings().llm_model_revision,
+                     'model':settings().llm_analysis_id,'provider':settings().llm_provider_mode}
+            if expected and expected!=current:
+                raise ModelUnavailable('Настройки модели изменились после создания задачи. Запустите новый разбор.')
             with owned(Run,run.id,run.lease_token):
                 run_agent(db, run)
         except LeaseLost:

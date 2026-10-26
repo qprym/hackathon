@@ -21,6 +21,92 @@
         }
       }
     },
+    "/api/admin/llm-settings": {
+      "get": {
+        "summary": "Get Llm Settings",
+        "operationId": "get_llm_settings_api_admin_llm_settings_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Update Llm Settings",
+        "operationId": "update_llm_settings_api_admin_llm_settings_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConnectionInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/llm-settings/reset": {
+      "post": {
+        "summary": "Restore Llm Environment",
+        "operationId": "restore_llm_environment_api_admin_llm_settings_reset_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SettingsRevision"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/auth/login": {
       "post": {
         "summary": "Login",
@@ -1167,6 +1253,143 @@
         ],
         "title": "Body_upload_pdf_api_admin_import_pdf_post"
       },
+      "ConnectionInput": {
+        "properties": {
+          "revision": {
+            "type": "string",
+            "title": "Revision"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "default": false
+          },
+          "provider_mode": {
+            "type": "string",
+            "enum": [
+              "local",
+              "remote"
+            ],
+            "title": "Provider Mode",
+            "default": "remote"
+          },
+          "base_url": {
+            "type": "string",
+            "maxLength": 1000,
+            "title": "Base Url",
+            "default": ""
+          },
+          "api_key": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "password",
+                "writeOnly": true
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key"
+          },
+          "clear_api_key": {
+            "type": "boolean",
+            "title": "Clear Api Key",
+            "default": false
+          },
+          "analysis_model": {
+            "type": "string",
+            "title": "Analysis Model"
+          },
+          "analysis_id": {
+            "type": "string",
+            "maxLength": 150,
+            "title": "Analysis Id",
+            "default": ""
+          },
+          "extraction_model": {
+            "type": "string",
+            "title": "Extraction Model"
+          },
+          "extraction_id": {
+            "type": "string",
+            "maxLength": 150,
+            "title": "Extraction Id",
+            "default": ""
+          },
+          "model_revision": {
+            "type": "string",
+            "maxLength": 100,
+            "title": "Model Revision",
+            "default": ""
+          },
+          "timeout_seconds": {
+            "type": "integer",
+            "maximum": 3600.0,
+            "minimum": 1.0,
+            "title": "Timeout Seconds",
+            "default": 180
+          },
+          "context_characters": {
+            "type": "integer",
+            "maximum": 10000000.0,
+            "minimum": 4000.0,
+            "title": "Context Characters",
+            "default": 120000
+          },
+          "automatic": {
+            "type": "boolean",
+            "title": "Automatic",
+            "default": false
+          },
+          "active_company_ids": {
+            "type": "string",
+            "maxLength": 4000,
+            "title": "Active Company Ids",
+            "default": "U_26491,U_989,U_6923"
+          },
+          "input_rub_per_million": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Input Rub Per Million",
+            "default": 0
+          },
+          "output_rub_per_million": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Output Rub Per Million",
+            "default": 0
+          },
+          "daily_limit_rub": {
+            "type": "number",
+            "maximum": 500.0,
+            "minimum": 0.0,
+            "title": "Daily Limit Rub",
+            "default": 450
+          },
+          "test_limit_rub": {
+            "type": "number",
+            "maximum": 500.0,
+            "minimum": 0.0,
+            "title": "Test Limit Rub",
+            "default": 0
+          },
+          "request_limit": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Request Limit",
+            "default": 20
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "revision",
+          "analysis_model",
+          "extraction_model"
+        ],
+        "title": "ConnectionInput"
+      },
       "FeedPage": {
         "properties": {
           "items": {
@@ -1226,6 +1449,14 @@
             "type": "object",
             "title": "Personalization",
             "description": "Готовность персонализации независимо от фильтров; not_processed не означает нерелевантность"
+          },
+          "available_topics": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Available Topics",
+            "description": "Темы всей подборки до поиска, тематического фильтра и пагинации"
           }
         },
         "additionalProperties": true,
@@ -1414,6 +1645,20 @@
           "company_id"
         ],
         "title": "ReadingListRequest"
+      },
+      "SettingsRevision": {
+        "properties": {
+          "revision": {
+            "type": "string",
+            "maxLength": 100,
+            "title": "Revision"
+          }
+        },
+        "type": "object",
+        "required": [
+          "revision"
+        ],
+        "title": "SettingsRevision"
       },
       "ValidationError": {
         "properties": {

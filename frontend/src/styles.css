@@ -412,6 +412,7 @@ form {
   min-height: 100vh;
 }
 .sidebar {
+  overflow-y: auto;
   width: 238px;
   position: fixed;
   inset: 0 auto 0 0;
@@ -1463,6 +1464,9 @@ form {
 .import-form {
   margin-top: 25px;
 }
+.llm-settings { max-width: 960px; }
+.llm-settings details { padding: 18px; border: 1px solid var(--border); border-radius: 12px; }
+.llm-settings summary { cursor: pointer; font-weight: 700; margin-bottom: 16px; }
 .import-form input,
 .import-form select,
 .import-form textarea {
