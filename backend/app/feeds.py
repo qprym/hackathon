@@ -65,6 +65,7 @@ def refresh_feed(key, *, force=False, actor="worker"):
 
 
 def feed_status(db):
+    cfg=settings()
     states = {state.key: state for state in db.scalars(select(FeedState)).all()}
     iso = lambda value: value.isoformat() + "Z" if value else None
     items = []
@@ -73,19 +74,22 @@ def feed_status(db):
         status = state.status if state else "pending"
         if state and status == "running" and state.lease_until and state.lease_until < utcnow():
             status = "recovering"
-        items.append({"key": key, "name": name, "status": status,
+        scheduled=cfg.auto_fetch_rss and key in cfg.rss_sources
+        items.append({"key": key, "name": name, "status": status,'scheduled':scheduled,'url':FEEDS[key],
             "last_started_at": iso(state.last_started_at) if state else None,
             "last_finished_at": iso(state.last_finished_at) if state else None,
-            "next_refresh_at": iso(state.next_refresh_at) if state else None,
+            "next_refresh_at": iso(state.next_refresh_at) if state and scheduled else None,
             "report": state.report if state else {}, "error": state.error if state else None})
     return {"automatic": settings().auto_fetch_rss, "interval_seconds": settings().rss_refresh_seconds, "items": items}
 
 
 def feed_loop(stop):
     while not stop.is_set():
-        for key in FEEDS:
+        for key in list(settings().rss_sources):
             if stop.is_set():
                 return
+            if not settings().auto_fetch_rss:break
+            if key not in settings().rss_sources:continue
             try:
                 refresh_feed(key)
             except Exception:

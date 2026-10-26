@@ -57,7 +57,8 @@ test("unseen news is imported, analyzed and receives feedback", async ({ page })
   await page.getByRole("button", { name: "Новостная аналитика", exact: true }).click();
   await page.getByRole("button", { name: "Учебные события", exact: true }).click();
   await page.getByLabel("Поиск по ленте", { exact: true }).fill(title);
-  await page.getByRole("button", { name: title, exact: true }).click();
+  await page.locator('.event-card').filter({has:page.getByRole('button',{name:title,exact:true})})
+    .getByRole('button',{name:'Разобрать влияние',exact:true}).click();
   await expect(page.getByRole("heading", { name: "Влияние на ваш бизнес", exact: true })).toBeVisible({ timeout: 30000 });
   await page.getByRole("button", { name: "Полезно", exact: true }).click();
   await expect(page.getByText("Сохранено", { exact: true })).toBeVisible();

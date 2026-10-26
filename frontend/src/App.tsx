@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import LlmSettings from './LlmSettings';
+import FeedSettings from './FeedSettings';
 import {
   ArrowDownLeft,
   ArrowLeft,
@@ -75,11 +76,17 @@ type Context = Company & {
 };
 type EventItem = {
   id: string;
+  document_id: string | null;
   title: string;
   summary: string;
+  summary_truncated?: boolean;
+  source_coverage?: string;
+  reading_notes?: {term:string;meaning:string}[];
+  analysis?: {status:'saved'|'available'|'unavailable';run_id?:string;message?:string;mode?:string};
   publisher: string;
   score: number;
   reasons: string[];
+  feature_keys?: string[];
   topics: string[];
   published_at: string;
   synthetic: boolean;
@@ -87,17 +94,20 @@ type EventItem = {
   related_publications?: { document_id: string; title: string; publisher: string }[];
   ranking_method?: string;
   ranking_status?: string;
+  ranking_historical?: boolean;
   ordering?: { note: string; repeated_financial_topics: string[] };
   previous_editions?: { id: string; document_id: string | null; title: string; published_at: string; publisher: string }[];
   ranking_grounds?: { document_id: string | null; quote: string; publisher: string; location?: string }[];
   exposure: { level: "direct" | "indirect" | "unknown"; note: string };
 };
-type SelectionStatus = { method: string; model: string; total: number; completed: number; queued: number; failed: number; not_requested: number; can_request: boolean };
+type SelectionStatus = { method: string; model: string; total: number; completed: number; queued: number; failed: number; not_requested: number; historical?: number; budget_blocked?: number; can_request: boolean };
 type ListSelection = { status: string; version: string; job_id: string | null; historical?: boolean; insufficient?: number };
 type FeedResponse = { items: EventItem[]; topics: Record<string, string>; selection: SelectionStatus; list_selection?: ListSelection | null;
   available_topics: string[];
+  relationship_counts?: {direct:number;indirect:number;unknown:number};
+  processing?: {news_updates:boolean;analysis_mode:'saved_only'|'demo'|'llm'};
   personalization?: { status: string; selected_count: number; article_count: number; assessed_count: number };
-  feed_version: string; total: number; next_offset: number | null; pipeline: { automatic: boolean; model_available: boolean; provider_mode: string } };
+  feed_version: string; total: number; next_offset: number | null; pipeline: { automatic: boolean; model_available: boolean; provider_mode: string; paused_reason?:string|null } };
 type Evidence = {
   id: string;
   document_id: string;
@@ -156,6 +166,7 @@ type Source = {
   id: string;
   title: string;
   content: string;
+  reading_notes?: {term:string;meaning:string}[];
   publisher: string;
   url: string | null;
   synthetic: boolean;
@@ -1475,6 +1486,11 @@ export default function App() {
     [topic, setTopic] = useState(""),
     [search, setSearch] = useState("");
   const [availableTopics,setAvailableTopics]=useState<string[]>([]);
+  const [feedSort,setFeedSort]=useState('relevance');
+  const [analysisPending,setAnalysisPending]=useState<string|null>(null);
+  const [analysisErrors,setAnalysisErrors]=useState<Record<string,string>>({});
+  const analysisAttempt=useRef(0);
+  useEffect(()=>{analysisAttempt.current++;setAnalysisPending(null);setAnalysisErrors({});},[companyId,role,corpus]);
   const [page, setPage] = useState("feed"),
     [runId, setRunId] = useState<string | null>(null),
     [busy, setBusy] = useState(false),
@@ -1530,7 +1546,7 @@ export default function App() {
     Promise.all([
       api<Context>(`/companies/${encodeURIComponent(companyId)}/context`),
       api<FeedResponse>(
-        `/feed?company_id=${encodeURIComponent(companyId)}&role=${role}&corpus=${corpus}&q=${encodeURIComponent(search)}&topic=${encodeURIComponent(topic)}&scope=${feedScope}&limit=5`,
+        `/feed?company_id=${encodeURIComponent(companyId)}&role=${role}&corpus=${corpus}&q=${encodeURIComponent(search)}&topic=${encodeURIComponent(topic)}&scope=${feedScope}&sort=${feedSort}&limit=5`,
       ),
     ])
       .then(([c, f]) => {
@@ -1558,7 +1574,7 @@ export default function App() {
     return () => {
       active = false;
     };
-  }, [companyId, role, revision, corpus, companies, search, topic, feedScope]);
+  }, [companyId, role, revision, corpus, companies, search, topic, feedScope,feedSort]);
   useEffect(() => {
     if (!user) return;
     let active = true;
@@ -1571,7 +1587,7 @@ export default function App() {
         if (active) setFeedStatus(status);
         if (companyId && page === "feed" && !runId) {
           const feed = await api<FeedResponse>(
-            `/feed?company_id=${encodeURIComponent(companyId)}&role=${role}&corpus=${corpus}&q=${encodeURIComponent(search)}&topic=${encodeURIComponent(topic)}&scope=${feedScope}&limit=5`,
+            `/feed?company_id=${encodeURIComponent(companyId)}&role=${role}&corpus=${corpus}&q=${encodeURIComponent(search)}&topic=${encodeURIComponent(topic)}&scope=${feedScope}&sort=${feedSort}&limit=5`,
           );
           if (active && currentFeed.current) {
             setFeedChanged(feed.feed_version !== currentFeed.current);
@@ -1584,13 +1600,13 @@ export default function App() {
     void refresh();
     const timer = window.setInterval(() => void refresh(), 15000);
     return () => { active = false; window.clearInterval(timer); };
-  }, [user, companyId, role, corpus, page, runId, revision, search, topic, feedScope]);
+  }, [user, companyId, role, corpus, page, runId, revision, search, topic, feedScope,feedSort]);
   async function loadMore() {
     if (!feedMeta || feedMeta.next_offset === null || moreBusy) return;
     const version = currentFeed.current;
     setMoreBusy(true); setError("");
     try {
-      const next = await api<FeedResponse>(`/feed?company_id=${encodeURIComponent(companyId)}&role=${role}&corpus=${corpus}&q=${encodeURIComponent(search)}&topic=${encodeURIComponent(topic)}&scope=${feedScope}&limit=5&offset=${feedMeta.next_offset}&feed_version=${encodeURIComponent(feedMeta.feed_version)}`);
+      const next = await api<FeedResponse>(`/feed?company_id=${encodeURIComponent(companyId)}&role=${role}&corpus=${corpus}&q=${encodeURIComponent(search)}&topic=${encodeURIComponent(topic)}&scope=${feedScope}&sort=${feedSort}&limit=5&offset=${feedMeta.next_offset}&feed_version=${encodeURIComponent(feedMeta.feed_version)}`);
       if (currentFeed.current === version) { setItems(old => [...old, ...next.items]); setFeedMeta(next); }
     } catch (e) { setError((e as Error).message); }
     finally { setMoreBusy(false); }
@@ -1603,17 +1619,24 @@ export default function App() {
     return () => window.removeEventListener("keydown", close);
   }, []);
   async function analyze(event: EventItem) {
-    setError("");
+    if(analysisPending)return;
+    setAnalysisErrors(previous=>({...previous,[event.id]:''}));
+    if(event.analysis?.status==='unavailable'){
+      setAnalysisErrors(previous=>({...previous,[event.id]:event.analysis?.message||'Вызовы модели отключены. Сохранённого разбора нет.'}));return;
+    }
+    if(event.analysis?.status==='saved'&&event.analysis.run_id){setRunId(event.analysis.run_id);window.scrollTo({top:0});return;}
+    const attempt=++analysisAttempt.current;
+    setAnalysisPending(event.id);
     try {
       const r = await post<{ run_id: string }>("/analyses", {
         company_id: companyId,
         event_id: event.id,
         role,
       });
-      setRunId(r.run_id);
+      if(attempt===analysisAttempt.current){setRunId(r.run_id);window.scrollTo({top:0});}
     } catch (e) {
-      setError((e as Error).message);
-    }
+      if(attempt===analysisAttempt.current)setAnalysisErrors(previous=>({...previous,[event.id]:(e as Error).message}));
+    } finally {if(attempt===analysisAttempt.current)setAnalysisPending(null);}
   }
   async function openExample(id: string) {
     setError('');
@@ -1838,7 +1861,7 @@ export default function App() {
                     <button aria-pressed={corpus === "real"} onClick={() => { setCorpus("real"); setTopic(""); setSearch(""); }}>Реальные новости</button>
                     {context?.synthetic && <button aria-pressed={corpus === "synthetic"} onClick={() => { setCorpus("synthetic"); setTopic(""); setSearch(""); }}>Учебные события</button>}
                   </div>
-                  {feedStatus && <span className="muted small">{feedStatus.automatic ? `Автообновление · каждые ${Math.round(feedStatus.interval_seconds / 60)} мин` : "Автообновление отключено"}</span>}
+                  {feedStatus && <span className="muted small">{feedStatus.automatic ? `Автообновление · каждые ${Math.round(feedStatus.interval_seconds / 60)} мин` : "Автообновление отключено"} {user.is_admin&&<button className="text-button" onClick={()=>setPage('import')}>Настроить автообновление</button>}</span>}
                 </div>
                 {corpus === "real" && feedStatus && <div className="feed-status" aria-label="Состояние источников">
                   {feedStatus.items.map((feed) => <div key={feed.key} className={`feed-status-item ${feed.status}`}>
@@ -1851,13 +1874,28 @@ export default function App() {
                     </span>{feed.error && <span>{feed.error}</span>}</div>
                   </div>)}
                 </div>}
+                {corpus === 'real' && feedMeta?.processing && <div className="panel feed-mode" aria-label="Режим работы ленты">
+                  <strong>{feedMeta.processing.analysis_mode==='saved_only'?'Сохранённые новости и оценки · модель отключена':feedMeta.processing.analysis_mode==='demo'?'Разбор без LLM · учебный режим':'Вызовы модели разрешены'}</strong>
+                  <p>{feedMeta.processing.news_updates?'Источники обновляются по расписанию.':'Автообновление источников отключено; это ранее загруженные статьи.'} {feedMeta.processing.analysis_mode==='saved_only'?'Оценка связи не означает, что готов подробный разбор. Новая генерация сейчас не выполняется.':'Подробный разбор запускается кнопкой в карточке.'}</p>
+                  {user.is_admin&&feedMeta.processing.analysis_mode==='saved_only'&&<button className="text-button" onClick={()=>setPage('settings')}>Настроить подключение LLM</button>}
+                </div>}
+                <details className="panel feed-explainer">
+                  <summary>Как определяется связь с компанией</summary>
+                  <p>Для реальных новостей модель сопоставляет полный доступный текст с профилем компании и выбранной ролью. Проверяются цитаты источника и признаки профиля. Для учебных примеров используются демонстрационные правила.</p>
+                  <p><strong>Прямая связь с профилем</strong> — модель нашла конкретное подтверждённое основание применимости. Это не доказательство убытка, выгоды или изменения условий вашего договора.</p>
+                  <p><strong>Условная применимость</strong> — модель предлагает сценарий, для которого надо уточнить условия. Такая оценка может быть ошибочной: одного наличия кредита недостаточно, чтобы считать компанию участником специальной программы.</p>
+                  <p><strong>Связь не установлена</strong> — полезное основание не найдено. <strong>Оценка не готова</strong> — материал ещё не проверен.</p>
+                  {feedMeta?.relationship_counts&&<p>Во всей выбранной области просмотра: прямых — {feedMeta.relationship_counts.direct}, условных — {feedMeta.relationship_counts.indirect}, без установленной связи — {feedMeta.relationship_counts.unknown}. Смена компании и роли может менять оценки.</p>}
+                </details>
                 {corpus === "real" && selection && <div className="feed-status" aria-label="Нейросетевой отбор">
                   <div className="feed-status-item">
                     <Sparkles size={18} />
-                    <div><strong>{selection.model === "deepseek-flash" ? "Отбор DeepSeek" : "Нейросетевой отбор"} · проверено {selection.completed} из {selection.total}</strong>
+                    <div><strong>{selection.model === "deepseek-flash" ? "Сохранённые оценки DeepSeek" : "Сохранённые оценки модели"} · проверено {selection.completed} из {selection.total}</strong>
                       <span>Полный доступный текст статьи и контекст вашей компании. Все материалы доступны в отдельном режиме поиска.</span>
                       {!!selection.queued && <span>В очереди: {selection.queued}</span>}
-                      {!!selection.failed && <span>Не прошли предварительную проверку: {selection.failed}.</span>}
+                      {!!selection.historical && <span>Ещё {selection.historical} оценок сохранены с прежними настройками подключения. Они показаны отдельно от новых проверок.</span>}
+                      {!!selection.failed && <span>Не удалось обработать: {selection.failed}.</span>}
+                      {!!selection.budget_blocked&&<span role="alert">Для {selection.budget_blocked} материалов не хватило свободного лимита API. Измените лимит в настройках LLM и сохраните для возобновления.</span>}
                       {!selection.can_request && <span>На этом стенде доступны сохранённые оценки.</span>}
                       {listSelection?.status === "completed" && <span><strong>{listSelection.historical ? "Сохранённая короткая подборка дополнена остальными оценёнными материалами. Полный порядок ещё требует проверки моделью." : "Полная лента проверена моделью: приоритетные события вверху, остальные доступны ниже."}</strong></span>}
                       {listSelection?.status === "stale" && <span>Источники или профиль изменились. Полная подборка ожидает обновления.</span>}
@@ -1866,7 +1904,8 @@ export default function App() {
                       {listSelection?.status === "not_requested" && <span>Полный сравнительный порядок пока не подготовлен.</span>}
                       {!!listSelection?.insufficient && <span>Для {listSelection.insufficient} материалов недостаточно данных для оценки применимости.</span>}
                       {!feedMeta?.pipeline.model_available && <span>Модель на этом стенде не подключена. Доступны сохранённые результаты.</span>}
-                      {feedMeta?.pipeline.automatic && <span>Новые статьи обрабатываются автоматически.</span>}
+                      {feedMeta?.pipeline.paused_reason?<span role="alert">{feedMeta.pipeline.paused_reason}</span>
+                        :feedMeta?.pipeline.automatic&&<span>Новые статьи обрабатываются автоматически{feedMeta.pipeline.provider_mode==='remote'?' в пределах бюджета API':''}.</span>}
                     </div>
                   </div>
                   {selection.can_request && user.is_admin && <button className="text-button" disabled={selectionBusy} onClick={async () => {
@@ -1905,7 +1944,7 @@ export default function App() {
                           .length.toString()
                           .padStart(2, "0")}
                       </strong>
-                      <span>приоритетных среди показанных</span>
+                      <span>с прямой связью среди показанных</span>
                     </div>
                     <div className="overview-mark">
                       <TrendingUp size={37} />
@@ -1928,6 +1967,9 @@ export default function App() {
                         />
                       </div>
                     </div>
+                    <label className="feed-sort">Порядок событий<select aria-label="Сортировка событий" value={feedSort} onChange={e=>setFeedSort(e.target.value)}>
+                      <option value="relevance">По релевантности</option><option value="newest">Сначала новые</option><option value="oldest">Сначала старые</option>
+                    </select></label>
                     <div className="filters" aria-label="Область поиска">
                       <button className={feedScope === "personal" ? "active" : ""} onClick={() => setFeedScope("personal")}>Для моей компании</button>
                       <button className={feedScope === "all" ? "active" : ""} onClick={() => setFeedScope("all")}>Все материалы</button>
@@ -1976,8 +2018,8 @@ export default function App() {
                                 {event.ranking_method === 'llm' && event.exposure.level === 'unknown'
                                   ? (event.score === 0 && event.ranking_status === 'completed' ? "Связь не установлена" : "Оценка не готова")
                                   : event.exposure.level === 'direct'
-                                  ? "Высокая значимость"
-                                  : event.exposure.level === 'indirect' ? "Косвенная связь" : "В контексте бизнеса"}
+                                  ? "Прямая связь с профилем"
+                                  : event.exposure.level === 'indirect' ? "Условная применимость" : "Связь не установлена"}
                               </span>
                               <span>
                                 <Clock3 size={13} />
@@ -1986,18 +2028,22 @@ export default function App() {
                             </div>
                             <button
                               className="event-title"
-                              onClick={() => void analyze(event)}
+                              onClick={() => event.document_id ? void openSource(event.document_id) : void analyze(event)}
                             >
                               {event.title}
                             </button>
+                            <p className="overline excerpt-label">{event.source_coverage==='summary'?'Аннотация источника':event.summary_truncated?'Начало статьи':'Текст статьи'}</p>
                             <p className="event-summary">{event.summary}</p>
+                            {!!event.reading_notes?.length&&<p className="small muted">Сокращения источника: {event.reading_notes.map(n=>`${n.term} — ${n.meaning}`).join('; ')}.</p>}
+                            {event.document_id&&<button className="text-button read-article" onClick={()=>void openSource(event.document_id!)}>{event.source_coverage==='summary'?'Читать доступную аннотацию':'Читать полный доступный текст'} <FileText size={14}/></button>}
                             <div className="relevance">
                               <span>
                                 <Sparkles size={15} />
                               </span>
                               <div>
-                                <strong>{event.exposure.level === "unknown" ? "Связь с компанией" : "Почему важно для вас"}{event.ranking_method === "llm" && event.ranking_status === "completed" ? " · AI" : ""}</strong>
+                                <strong>{event.exposure.level === "unknown" ? "Связь с компанией" : event.exposure.level==='indirect'?'Когда может быть полезно':'Почему важно для вас'}{event.ranking_method === "llm" && event.ranking_status === "completed" ? " · AI" : ""}</strong>
                                 <p>{event.reasons.slice(0, 2).join(". ")}</p>
+                                {event.ranking_historical&&<p className="small muted">Сохранённая оценка прежнего подключения. Текущая модель ещё не перепроверила этот материал.</p>}
                                 {!event.reasons.includes(event.exposure.note) && <p className="small muted">{event.exposure.note}</p>}
                                 {!!event.ordering?.repeated_financial_topics.length && <details className="small">
                                   <summary>Почему ниже в подборке</summary>
@@ -2005,6 +2051,7 @@ export default function App() {
                                 </details>}
                                 {!!event.ranking_grounds?.length && <details className="small">
                                   <summary>Основания отбора</summary>
+                                  {event.feature_keys?.map(key=>{const feature=context?.features[key];return feature?<p key={key}><strong>Признак профиля: {feature.label}</strong> — {formatValue(key,feature.value,feature.unit)}.<br/><span className="muted">Основание: {feature.source}</span></p>:null;})}
                                   {event.ranking_grounds.map((ground, index) => <div key={index}>
                                     <p>{ground.location === 'title' ? 'Из заголовка: ' : ''}«{ground.quote}»</p>
                                     {ground.document_id && <button className="text-button" onClick={() => void openSource(ground.document_id!)}>{ground.publisher} · открыть источник</button>}
@@ -2023,12 +2070,19 @@ export default function App() {
                               </span>
                               <button
                                 className="text-button"
+                                disabled={analysisPending!==null}
+                                aria-busy={analysisPending===event.id}
                                 onClick={() => void analyze(event)}
                               >
-                                Разобрать влияние
+                                {analysisPending===event.id?'Открываем разбор…':event.analysis?.status==='saved'?'Открыть сохранённый разбор':event.analysis?.status==='unavailable'?'Почему нет разбора':'Разобрать влияние'}
                                 <ArrowRight size={16} />
                               </button>
                             </div>
+                            {event.analysis?.status==='unavailable'&&<p className="analysis-unavailable small">Готового разбора нет · модель отключена</p>}
+                            {analysisErrors[event.id]&&<div className="error-box analysis-error" role="alert">
+                              <p>{analysisErrors[event.id]}</p>
+                              {user.is_admin&&event.analysis?.status==='unavailable'&&<button className="text-button" onClick={()=>setPage('settings')}>Перейти в настройки LLM</button>}
+                            </div>}
                             {!!event.related_publications?.length && (
                               <details className="small">
                                 <summary>Другие публикации об этом событии ({event.related_publications.length})</summary>
@@ -2082,7 +2136,7 @@ export default function App() {
           )}
           {page === 'examples' && <Showcase onOpen={openExample} />}
           {page === "import" && user.is_admin && (
-            <ImportPanel onChange={() => setRevision((r) => r + 1)} />
+            <><FeedSettings request={api} onSaved={()=>setRevision(r=>r+1)}/><ImportPanel onChange={() => setRevision((r) => r + 1)} /></>
           )}
           {page === "metrics" && user.is_admin && <MetricsPanel />}
           {page === 'settings' && user.is_admin && <LlmSettings request={api} onSaved={()=>{
@@ -2142,6 +2196,7 @@ export default function App() {
                 Стр. {p.number} · {p.text_status === 'empty' ? 'текст не извлечён' : p.text_status === 'ocr' ? 'текст распознан OCR' : 'доступен текст'} · графики: {p.visual_status === 'verified' ? 'проверены' : 'не проверены'} · таблицы: {p.numeric_tables_status === 'verified' ? 'проверены' : 'не проверены'}
               </p>)}
             </details>}
+            {!!source.reading_notes?.length&&<p className="form-note">Сокращения в оригинале: {source.reading_notes.map(n=>`${n.term} — ${n.meaning}`).join('; ')}. Текст источника сохранён без подмены формулировок.</p>}
             <div className="source-content">{source.content}</div>
             {source.url && /^https?:\/\//.test(source.url) && (
               <a

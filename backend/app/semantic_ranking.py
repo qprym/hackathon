@@ -247,6 +247,12 @@ def process_one(job_id=None,*,defer_review=False):
                 from .full_selection import process_claimed
                 process_claimed(db,job,current)
                 return True
+            if job.payload.get('purpose')=='resume_selection_review':
+                review_id=review_cached(job.company_id,job.cache_keys,job.user_id)
+                db.expire_all();review=db.get(RankingJob,review_id)
+                job.status=review.status;job.error=review.error;job.response={'review_job_id':review_id}
+                job.finished_at=utcnow();job.lease_until=None;db.commit()
+                return True
             raw=complete_json(POLICY,job.payload,run_id=job.id,max_tokens=10000,reasoning=True)
             job.response=raw;db.commit()  # Preserve even an invalid model response for free replay.
             parsed=parse_batch(raw)
@@ -381,6 +387,10 @@ def feed_ranking(assessment,role):
         state=assessment.status if assessment else 'not_requested'
         if state in ('completed','reviewing'):state='queued'
         note='Оценка нейросети ещё не готова.' if state!='failed' else 'Нейросетевой отбор не прошёл проверку; автоматического повтора нет.'
+        if state=='failed' and any(term in (assessment.error or '') for term in ('денежный лимит','Дневной бюджет','Остатка бюджета')):
+            note='Оценка не завершена из-за лимита API. Это не вывод о нерелевантности статьи.'
+        elif state=='failed' and 'HTTP 402' in (assessment.error or ''):
+            note='Оценка не завершена: провайдер сообщил о недостатке средств на счёте.'
         return {'score':0,'eligible':False,'reasons':[note],'topics':[],'feature_keys':[],
                 'exposure':{'level':'unknown','note':note},'ranking_version':SELECTION_VERSION,
                 'ranking_method':'llm','ranking_status':state,'ranking_grounds':[]}

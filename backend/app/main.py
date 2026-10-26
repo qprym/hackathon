@@ -18,6 +18,8 @@ from fastapi.exception_handlers import request_validation_exception_handler
 from .context import company_context
 from .db import SessionLocal, engine, get_db, initialize_development_schema, utcnow
 from .ingestion import FEEDS, extract_pdf, import_csv, import_document
+from .feed_presentation import article_preview, analysis_states, reading_notes
+from .feed_settings import FeedSettingsInput,public_settings as public_feed_settings,save_settings as save_feed_settings
 from .models import Audit, AuthSession, Budget, Company, Document, Event, Feedback, Link, Run, Usage, User, RankingJob, RelevanceAssessment
 from .retrieval import TOPIC_NAMES, RANKING_VERSION, NEWS_CONTEXT_VERSION, rank_event, search_documents
 from .news_focus import source_focus
@@ -115,6 +117,17 @@ def update_llm_settings(body:ConnectionInput,user:User=Depends(admin),db:Session
 
 class SettingsRevision(BaseModel):
     revision:str=Field(max_length=100)
+
+
+@app.get('/api/admin/feed-settings')
+def get_feed_settings(user:User=Depends(admin)):
+    return public_feed_settings()
+
+
+@app.post('/api/admin/feed-settings')
+def update_feed_settings(body:FeedSettingsInput,user:User=Depends(admin),db:Session=Depends(get_db)):
+    try:return save_feed_settings(db,user,body)
+    except OSError:raise HTTPException(503,'Не удалось сохранить настройки источников.') from None
 
 
 @app.post('/api/admin/llm-settings/reset')
@@ -216,7 +229,7 @@ def relations(company_id:str,q:str='',direction:Literal['all','incoming','outgoi
 
 @app.get("/api/feed",response_model=FeedPage)
 def feed(company_id: str, role: Role = "CFO", topic: str | None = None, corpus: Literal["real", "synthetic"] = "real",
-         q: str = "",
+         q: str = "", sort: Literal['relevance','newest','oldest']='relevance',
          scope: Literal['personal','all'] | None = None, feed_version: str | None = None,
          offset: int = Query(default=0,ge=0), limit: int = Query(default=20,ge=1,le=100),
          user: User = Depends(current_user), db: Session = Depends(get_db)):
@@ -227,7 +240,7 @@ def feed(company_id: str, role: Role = "CFO", topic: str | None = None, corpus: 
     from . import feed_pages, full_selection
     from .feed_selection import fold_editions
     search_scope=scope or ('all' if q.strip() else 'personal')
-    query={'role':role,'topic':topic,'corpus':corpus,'q':q.strip(),'scope':search_scope}
+    query={'role':role,'topic':topic,'corpus':corpus,'q':q.strip(),'scope':search_scope,'sort':sort}
     if feed_version:
         return feed_pages.read(db,user,company_id,ctx,query,feed_version,offset,limit)
     if offset:
@@ -238,11 +251,15 @@ def feed(company_id: str, role: Role = "CFO", topic: str | None = None, corpus: 
     ranking_as_of = utcnow()
     doc_ids = {doc_id for event in events for doc_id in event.document_ids}
     documents = {d.id:d for d in db.scalars(select(Document).where(Document.id.in_(doc_ids)))} if doc_ids else {}
-    assessments={r.article_key:r for r in db.scalars(select(RelevanceAssessment).where(
+    assessment_rows=db.scalars(select(RelevanceAssessment).where(
         RelevanceAssessment.company_id==company.id,RelevanceAssessment.context_key==fingerprint(ctx),
-        RelevanceAssessment.version==SELECTION_VERSION,RelevanceAssessment.model_id==settings().llm_analysis_id))
-        if r.cache_key==assessment_key(r.article_key,fingerprint(ctx))} if corpus=='real' else {}
-    selection_counts={'completed':0,'queued':0,'failed':0,'not_requested':0}
+        RelevanceAssessment.version==SELECTION_VERSION,RelevanceAssessment.model_id==settings().llm_analysis_id)
+        .order_by(RelevanceAssessment.created_at)).all() if corpus=='real' else []
+    assessments={r.article_key:r for r in assessment_rows if r.cache_key==assessment_key(r.article_key,fingerprint(ctx))}
+    historical={r.article_key:r for r in assessment_rows if feed_ranking(r,role)['ranking_status']=='completed'}
+    selection_counts={'completed':0,'queued':0,'failed':0,'not_requested':0,'historical':0}
+    selection_counts['budget_blocked']=sum(r.status=='failed' and any(term in (r.error or '') for term in
+        ('денежный лимит','Дневной бюджет','Остатка бюджета')) for r in assessments.values())
     records = [{'id':e.id,'title':e.title,'published_at':e.published_at.isoformat(),'document_ids':e.document_ids,
                 'sources':[{'url':d.url,'content':d.content} for key in e.document_ids if (d:=documents.get(key))]} for e in events]
     groups = group_records(records)
@@ -254,9 +271,14 @@ def feed(company_id: str, role: Role = "CFO", topic: str | None = None, corpus: 
         if corpus=='real':
             assessment=assessments.get(article_key(event,event_docs))
             ranking=feed_ranking(assessment,role)
+            selection_counts[ranking['ranking_status']]+=1
+            prior=historical.get(article_key(event,event_docs))
+            if ranking['ranking_status']!='completed' and prior:
+                ranking=feed_ranking(prior,role)
+                ranking['ranking_historical']=True
+                selection_counts['historical']+=1
             for ground in ranking.get('ranking_grounds',[]):
                 ground['document_id']=next((d.id for d in event_docs if d.content_hash==ground['content_hash']),None)
-            selection_counts[ranking['ranking_status']]+=1
         else:
             ranking=rank_event(focus,ctx,role,as_of=ranking_as_of)
             ranking.update(ranking_method='demo_rules',ranking_status='completed')
@@ -264,7 +286,7 @@ def feed(company_id: str, role: Role = "CFO", topic: str | None = None, corpus: 
             "event_group":groups[event.id],
             "document_id":doc.id if doc else None,
             "published_at": event.published_at.isoformat() + "Z", "synthetic": event.synthetic,
-            "summary": doc.content[:230] if doc else "", "publisher": doc.publisher if doc else "",
+            **article_preview(doc), "publisher": doc.publisher if doc else "",
             "source_count": len({d.publisher.casefold().strip() for d in event_docs}), **ranking})
     entries.sort(key=lambda item: (item["score"], item["published_at"], item['id']), reverse=True)
     candidates=[item for item in entries if item['eligible']]
@@ -290,7 +312,7 @@ def feed(company_id: str, role: Role = "CFO", topic: str | None = None, corpus: 
     if not events:personal_status='no_sources'
     elif corpus=='synthetic' or (list_selection and list_selection['status']=='completed' and not list_selection.get('historical')):
         personal_status='ready'
-    elif selection_counts['completed']:
+    elif selection_counts['completed'] or selection_counts['historical']:
         personal_status='ready' if selection_counts['completed']==len(events) else 'partial'
     elif selection_counts['queued'] or (list_selection and list_selection['status'] in ('queued','running')):
         personal_status='processing'
@@ -302,21 +324,29 @@ def feed(company_id: str, role: Role = "CFO", topic: str | None = None, corpus: 
         items=items+[e for e in entries if e['id'] not in ordered_ids]
     # Facets describe the complete scoped collection, not the current page or selected topic.
     available_topics=[key for key in TOPIC_NAMES if any(key in item['topics'] for item in items)]
+    relationship_counts={level:sum(item['exposure']['level']==level for item in items) for level in ('direct','indirect','unknown')}
     if topic:items=[item for item in items if topic in item['topics']]
     if q.strip():
         needle=q.strip().casefold()
         matched={e.id for e in events if needle in e.title.casefold() or any(needle in documents[k].content.casefold() for k in e.document_ids if k in documents)}
         items=[item for item in items if item['id'] in matched]
+    if sort!='relevance':items=sorted(items,key=lambda item:(item['published_at'],item['id']),reverse=sort=='newest')
+    actions=analysis_states(db,user,company_id,role,[item['id'] for item in items],corpus=='synthetic')
+    for item in items:item['analysis']=actions[item['id']]
+    from .llm import provider_pause
     payload={"items": items, "topics": TOPIC_NAMES, "company_id": company_id, "role": role, "corpus": corpus,
+            'relationship_counts':relationship_counts,
+            'processing':{'news_updates':settings().auto_fetch_rss,'analysis_mode':'saved_only' if settings().preview_cached_only and corpus=='real' else 'demo' if settings().demo_mode else 'llm'},
             'available_topics':available_topics,
-            'scope':search_scope,
+            'scope':search_scope,'sort':sort,
             'personalization':{'status':personal_status,'selected_count':selected_count,
                                'article_count':len(events),'assessed_count':selection_counts['completed']},
             "ranking_version":SELECTION_VERSION if corpus=='real' else RANKING_VERSION,
             "ordering_version":ordering_version,"list_selection":list_selection,
             "selection":{'method':'llm' if corpus=='real' else 'demo_rules','model':settings().llm_analysis_id,
                 'total':len(events),**selection_counts,'can_request':not settings().demo_mode and settings().neural_ranking_worker},
-            'pipeline':{'automatic':settings().auto_personalization and settings().llm_provider_mode=='local',
+            'pipeline':{'automatic':settings().auto_personalization and not settings().demo_mode,
+                'paused_reason':provider_pause(db),
                 'model_available':bool(settings().llm_base_url) and not settings().demo_mode,
                 'provider_mode':settings().llm_provider_mode}}
     return feed_pages.save(db,user,company_id,ctx,query,payload,offset,limit)
@@ -414,7 +444,7 @@ def create_run(db, user, body, question=None, parent=None, single_pass=False):
                 .order_by(Run.created_at.desc()).limit(1))
             if historical and set(historical.access_scope or []).issubset(user.company_ids):
                 return {'run_id':historical.id,'cached':True,'historical':True}
-        raise HTTPException(409,'На этом стенде доступны сохранённые разборы DeepSeek. Для этой компании, роли и статьи готового разбора нет; новый платный вызов отключён.')
+        raise HTTPException(409,'Для этой компании, роли и новости сохранённого разбора нет. Вызовы модели отключены. Полный текст статьи доступен без LLM; подключение настраивает администратор в «Настройки LLM».')
     existing = db.scalar(select(Run).where(Run.cache_key == key, Run.status.in_(["queued", "running", "completed"])).order_by(Run.created_at.desc()))
     if existing and not (parent and not question and existing.status == 'completed' and (existing.result or {}).get('verification') == 'insufficient'):
         return {"run_id": existing.id, "cached": existing.status == "completed"}
@@ -536,7 +566,8 @@ def source(source_id: str, user: User = Depends(current_user), db: Session = Dep
                 'visual_status':'not_verified','numeric_tables_status':'not_verified'})
     return {"id": doc.id, "title": doc.title, "kind": doc.kind, "publisher": doc.publisher,
             "url": doc.url, "published_at": doc.published_at.isoformat() + "Z", "content": doc.content,
-            "chunks": doc.chunks, "synthetic": doc.synthetic, "ingestion": meta}
+            "chunks": doc.chunks, "synthetic": doc.synthetic, "ingestion": meta,
+            "reading_notes":reading_notes(doc.content,doc.publisher)}
 
 
 @app.get("/api/library")

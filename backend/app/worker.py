@@ -72,9 +72,8 @@ def process_one():
 
 def work_loop(stop=None):
     stop = stop or threading.Event()
-    if settings().auto_fetch_rss:
-        from .feeds import feed_loop
-        threading.Thread(target=feed_loop, args=(stop,), name="news-refresh", daemon=True).start()
+    from .feeds import feed_loop
+    threading.Thread(target=feed_loop, args=(stop,), name="news-refresh", daemon=True).start()
     # Independent lanes prevent a long full-feed job from starving user analyses.
     def selection_loop():
         import time

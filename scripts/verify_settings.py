@@ -23,6 +23,8 @@ client=httpx.Client(base_url=args.url,headers={'X-Alfa-Request':'1'},timeout=30)
 response=client.post('/api/auth/login',json={'username':'demo','password':'demo-alfa-2026'})
 response.raise_for_status()
 before=client.get('/api/admin/llm-settings').json()
+feeds_before=client.get('/api/admin/feed-settings').json()
+assert not feeds_before['automatic']
 metrics=client.get('/api/admin/metrics').json()['llm_allowance']
 assert before['source']=='environment' and not before['enabled'] and not before['api_key_configured']
 assert metrics['requests_used']==0 and metrics['spent_rub']==0
@@ -51,5 +53,8 @@ finally:
     response.raise_for_status()
 
 assert client.get('/api/admin/metrics').json()['llm_allowance']==metrics
-assert client.get('/api/admin/llm-settings').json()==before
+after=client.get('/api/admin/llm-settings').json()
+assert {k:v for k,v in after.items() if k!='revision'}=={k:v for k,v in before.items() if k!='revision'}
+feeds_after=client.get('/api/admin/feed-settings').json()
+assert {k:v for k,v in feeds_after.items() if k!='revision'}=={k:v for k,v in feeds_before.items() if k!='revision'}
 print(json.dumps({'hot_reload':True,'restart_persistence':True,'mode_0600':True,'paid_calls':0}))

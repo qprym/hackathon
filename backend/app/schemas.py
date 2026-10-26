@@ -16,6 +16,9 @@ class FeedPage(BaseModel):
     pipeline: dict = Field(default_factory=dict,description='Автоматическая обработка и доступность настроенной модели')
     personalization: dict = Field(default_factory=dict,description='Готовность персонализации независимо от фильтров; not_processed не означает нерелевантность')
     available_topics: list[str] = Field(default_factory=list,description='Темы всей подборки до поиска, тематического фильтра и пагинации')
+    relationship_counts: dict[str,int] = Field(default_factory=dict,description='Число прямых, условных и неустановленных связей во всей области просмотра до фильтрации')
+    processing: dict = Field(default_factory=dict,description='Автообновление новостей и режим разбора: saved_only, demo или llm')
+    sort: Literal['relevance','newest','oldest']='relevance'
 
 
 class Login(BaseModel):

@@ -189,6 +189,13 @@ def test_provider_errors_are_safe_counted_and_not_retried(gateway, monkeypatch, 
     assert len(calls) == 1
     with SessionLocal() as db:
         assert llm.allowance_status(db)['requests_used'] == 1
+        if status==402:
+            assert llm.allowance_status(db)['spent_rub']==0
+            assert llm.provider_pause(db) and db.scalar(select(Usage)).status=='provider_rejected'
+    if status==402:
+        with pytest.raises(llm.ModelUnavailable,match='402'):
+            llm.complete_json('Return JSON', {}, max_tokens=16)
+        assert len(calls)==1
 
 
 def test_truncated_json_is_not_accepted_even_when_parseable(gateway, monkeypatch):

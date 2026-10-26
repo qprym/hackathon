@@ -71,6 +71,56 @@
         }
       }
     },
+    "/api/admin/feed-settings": {
+      "get": {
+        "summary": "Get Feed Settings",
+        "operationId": "get_feed_settings_api_admin_feed_settings_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Update Feed Settings",
+        "operationId": "update_feed_settings_api_admin_feed_settings_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FeedSettingsInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/admin/llm-settings/reset": {
       "post": {
         "summary": "Restore Llm Environment",
@@ -433,6 +483,21 @@
               "type": "string",
               "default": "",
               "title": "Q"
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "relevance",
+                "newest",
+                "oldest"
+              ],
+              "type": "string",
+              "default": "relevance",
+              "title": "Sort"
             }
           },
           {
@@ -1457,6 +1522,30 @@
             "type": "array",
             "title": "Available Topics",
             "description": "Темы всей подборки до поиска, тематического фильтра и пагинации"
+          },
+          "relationship_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Relationship Counts",
+            "description": "Число прямых, условных и неустановленных связей во всей области просмотра до фильтрации"
+          },
+          "processing": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Processing",
+            "description": "Автообновление новостей и режим разбора: saved_only, demo или llm"
+          },
+          "sort": {
+            "type": "string",
+            "enum": [
+              "relevance",
+              "newest",
+              "oldest"
+            ],
+            "title": "Sort",
+            "default": "relevance"
           }
         },
         "additionalProperties": true,
@@ -1469,6 +1558,46 @@
           "next_offset"
         ],
         "title": "FeedPage"
+      },
+      "FeedSettingsInput": {
+        "properties": {
+          "revision": {
+            "type": "string",
+            "maxLength": 100,
+            "title": "Revision"
+          },
+          "automatic": {
+            "type": "boolean",
+            "title": "Automatic"
+          },
+          "interval_seconds": {
+            "type": "integer",
+            "maximum": 86400.0,
+            "minimum": 60.0,
+            "title": "Interval Seconds"
+          },
+          "sources": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "cbr",
+                "vedomosti"
+              ]
+            },
+            "type": "array",
+            "maxItems": 2,
+            "title": "Sources"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "revision",
+          "automatic",
+          "interval_seconds",
+          "sources"
+        ],
+        "title": "FeedSettingsInput"
       },
       "FeedbackInput": {
         "properties": {

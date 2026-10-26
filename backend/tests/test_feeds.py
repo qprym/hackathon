@@ -84,7 +84,8 @@ def test_rss_to_real_feed_analysis_and_source(client, db, monkeypatch):
         assert PARAGRAPHS[1] in source['content']
     status = client.get('/api/feeds/status').json()
     vedomosti = next(s for s in status['items'] if s['key'] == 'vedomosti')
-    assert vedomosti['status'] == 'ok' and vedomosti['next_refresh_at']
+    assert vedomosti['status'] == 'ok'
+    assert not status['automatic'] and not vedomosti['scheduled'] and vedomosti['next_refresh_at'] is None
 
 
 def test_unavailable_article_is_labeled_summary_and_empty_is_error(client, db, monkeypatch):

@@ -87,16 +87,19 @@ export default function LlmSettings({request,onSaved}:{request:Request;onSaved:(
       </details>
       {form.provider_mode==='local'?<>
         <p className="form-note">Для модели на компьютере с Docker используйте host.docker.internal вместо localhost. Денежных лимитов и квоты запросов в локальном режиме нет.</p>
-        <label className="checkbox"><input type="checkbox" checked={form.automatic} onChange={e=>update({automatic:e.target.checked})}/>Автоматически обрабатывать новые новости локальной моделью</label>
-        {form.automatic&&<label>Компании для автоматической обработки<input value={form.active_company_ids} onChange={e=>update({active_company_ids:e.target.value})}/></label>}
       </>:<details open><summary>Бюджет удалённого API</summary>
-        <p className="form-note">Укажите тарифы провайдера. Сохранённая история расходов не обнуляется. Автоматические платные обращения при сохранении не запускаются.</p>
+        <p className="form-note">Укажите тарифы провайдера. Сохранённая история расходов не обнуляется. Автоматическая обработка расходует этот же бюджет.</p>
         <div className="form-row">{numeric('input_rub_per_million','Ввод, ₽ за миллион токенов')}{numeric('output_rub_per_million','Вывод, ₽ за миллион токенов')}</div>
         <div className="form-row">{numeric('test_limit_rub','Общий лимит теста, ₽',0,500)}{numeric('request_limit','Общий лимит обращений')}</div>
         {numeric('daily_limit_rub','Дневной лимит, ₽',0,500)}
       </details>}
-      <label className="checkbox"><input type="checkbox" checked={form.enabled} onChange={e=>update({enabled:e.target.checked})}/>Разрешить вызовы LLM</label>
-      <p className="form-note">{form.enabled&&form.automatic?'После сохранения начнётся автоматическая обработка выбранных компаний локальной моделью.':'Само сохранение не отправляет запросов к модели.'}</p>
+      <label className="checkbox"><input type="checkbox" checked={form.enabled} onChange={e=>update({enabled:e.target.checked,...(!e.target.checked?{automatic:false}:{})})}/>Разрешить вызовы LLM</label>
+      <label className="checkbox"><input type="checkbox" disabled={!form.enabled} checked={form.automatic} onChange={e=>update({automatic:e.target.checked})}/>Автоматически обрабатывать новые новости</label>
+      {form.automatic&&<label>Компании для автоматической обработки<input value={form.active_company_ids} onChange={e=>update({active_company_ids:e.target.value})}/></label>}
+      <p className="form-note">{form.enabled&&form.automatic
+        ?form.provider_mode==='remote'?'После сохранения модель будет оценивать новые и изменённые статьи для выбранных компаний и проверять оценки. Расходы ограничены указанным бюджетом. Старый архив и сравнительная перестройка всей ленты запускаются отдельно.'
+        :'После сохранения начнётся автоматическая обработка выбранных компаний локальной моделью.'
+        :'Само сохранение не отправляет запросов к модели.'}</p>
       <div className="showcase-actions"><button type="submit" className="primary" disabled={busy}>{busy?'Сохраняем…':'Сохранить настройки'}</button>
         {form.source==='interface'&&<button type="button" className="secondary" disabled={busy} onClick={()=>void reset()}>Вернуть настройки из .env</button>}</div>
     </form>

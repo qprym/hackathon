@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     auto_fetch_rss: bool = True
     rss_refresh_seconds: int = Field(default=1800, ge=60, le=86400)
     rss_item_limit: int = Field(default=50, ge=1, le=200)
+    rss_sources: list[Literal['cbr','vedomosti']] = Field(default_factory=lambda:['cbr','vedomosti'])
     allowed_origins: str = "http://localhost:5173,http://localhost:8080"
     llm_base_url: str = ""
     llm_provider_mode: Literal['remote','local'] = 'remote'
@@ -46,6 +47,7 @@ class Settings(BaseSettings):
     llm_budget_timezone: str = "Europe/Moscow"
     neural_ranking_worker: bool = False
     auto_personalization: bool = False
+    auto_personalization_started_at: str = ''
     active_company_ids: str = "U_26491,U_989,U_6923"
     pipeline_interval_seconds: int = Field(default=60, ge=5)
     llm_model_revision: str = ""
@@ -60,12 +62,14 @@ def environment_settings():
     return Settings()
 
 
-RUNTIME_FIELDS = frozenset({
-    'demo_mode','preview_cached_only','neural_ranking_worker','auto_personalization','active_company_ids',
+LLM_FIELDS = frozenset({
+    'demo_mode','preview_cached_only','neural_ranking_worker','auto_personalization','auto_personalization_started_at','active_company_ids',
     'llm_base_url','llm_provider_mode','llm_api_key','llm_local_api_key','llm_analysis_model','llm_analysis_id',
     'llm_extraction_model','llm_extraction_id','llm_timeout_seconds','llm_context_characters','llm_model_revision',
     'llm_input_rub_per_million','llm_output_rub_per_million','llm_daily_limit_rub','llm_request_limit','llm_test_limit_rub',
 })
+FEED_FIELDS=frozenset({'auto_fetch_rss','rss_refresh_seconds','rss_sources'})
+RUNTIME_FIELDS=LLM_FIELDS | FEED_FIELDS
 _pinned = ContextVar('llm_settings_snapshot', default=None)
 
 class SettingsUnavailable(RuntimeError):
@@ -93,7 +97,7 @@ def _resolved(base_json,document_json):
         cfg=Settings.model_validate(json.loads(base_json) | json.loads(document_json)['overrides'])
     except ValueError:
         raise SettingsUnavailable('Сохранённые настройки LLM не прошли проверку.') from None
-    if not cfg.demo_mode:
+    if not cfg.demo_mode and set(json.loads(document_json)['overrides']) & LLM_FIELDS:
         identity=[cfg.llm_provider_mode,cfg.llm_base_url,cfg.llm_analysis_model,cfg.llm_analysis_id,
                   cfg.llm_extraction_model,cfg.llm_extraction_id,cfg.llm_model_revision]
         cfg.llm_model_revision='connection-'+hashlib.sha256(json.dumps(identity).encode()).hexdigest()[:20]

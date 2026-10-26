@@ -10,10 +10,25 @@ from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from .config import APPROVED_MODELS, settings
-from .db import SessionLocal
-from .models import Audit, Budget, LlmAllowance, Usage
+from .db import SessionLocal,utcnow
+from .models import Audit, Budget, LlmAllowance, Usage,FeedState
 
 ALLOWANCE_KEY = "initial-trial"
+PROVIDER_BLOCK_KEY='llm-provider-block'
+PROVIDER_FUNDS_ERROR='На счёте провайдера недостаточно средств (HTTP 402). Обработка приостановлена. Пополните баланс провайдера, затем сохраните настройки LLM для возобновления.'
+
+
+def provider_pause(db):
+    if not remote_budget_enabled():return None
+    state=db.get(FeedState,PROVIDER_BLOCK_KEY)
+    return state.error if state and state.status=='blocked' and state.report.get('base_url')==settings().llm_base_url else None
+
+
+def block_provider(db):
+    values={'status':'blocked','error':PROVIDER_FUNDS_ERROR,'report':{'base_url':settings().llm_base_url,'http_status':402},'last_finished_at':utcnow()}
+    insert=pg_insert if db.bind.dialect.name=='postgresql' else sqlite_insert
+    db.execute(insert(FeedState).values(key=PROVIDER_BLOCK_KEY,**values)
+               .on_conflict_do_update(index_elements=['key'],set_=values))
 
 
 class ModelUnavailable(RuntimeError):
@@ -111,6 +126,10 @@ def complete_json(system, payload, *, run_id=None, extraction=False, max_tokens=
     remote=remote_budget_enabled()
     if cfg.demo_mode:
         raise ModelUnavailable("LLM отключена в демонстрационном режиме")
+    if remote:
+        with SessionLocal() as db:
+            paused=provider_pause(db)
+        if paused:raise ModelUnavailable(paused)
     model = cfg.llm_extraction_model if extraction else cfg.llm_analysis_model
     model_id = cfg.llm_extraction_id if extraction else cfg.llm_analysis_id
     if model not in APPROVED_MODELS:
@@ -186,12 +205,18 @@ def complete_json(system, payload, *, run_id=None, extraction=False, max_tokens=
                 if secret:safe={k:v.replace(secret,'[redacted]') for k,v in safe.items()}
             with SessionLocal() as audit_db:
                 audit_db.add(Audit(action='llm_provider_error',actor='llm-gateway',details={
-                    'run_id':run_id,'status_code':exc.response.status_code,'error':safe}));audit_db.commit()
+                    'run_id':run_id,'status_code':exc.response.status_code,'error':safe}))
+                if remote and exc.response.status_code==402:block_provider(audit_db)
+                audit_db.commit()
             messages = {401: 'DeepSeek/API отклонил ключ (HTTP 401). Проверьте ключ в локальном .env.',
-                402: 'На счёте провайдера недостаточно средств (HTTP 402). Повторный запрос не выполнялся.',
+                402: PROVIDER_FUNDS_ERROR,
                 429: 'Провайдер ограничил частоту запросов (HTTP 429). Автоматического повтора нет.'}
             error = ModelUnavailable(messages.get(exc.response.status_code,
                 f'Провайдер LLM вернул HTTP {exc.response.status_code}. Автоматического повтора нет.'))
+            if exc.response.status_code==402:
+                # Explicit payment rejection: release the application's money reservation.
+                # The HTTP attempt remains counted. Unknown outcomes/timeouts keep their reserve.
+                usage={'prompt_tokens':0,'completion_tokens':0};status='provider_rejected'
             if exc.response.status_code==400 and any(term in exc.response.text.lower() for term in
                     ('context length','context_length','maximum context','too many tokens')):
                 error=ModelUnavailable('Полные материалы превышают контекст модели. Текст не сокращался; автоматического повтора нет. Выберите меньший пакет статей или модель с достаточным контекстом.')
