@@ -99,6 +99,7 @@ class Run(Base):
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     lease_until: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    lease_token: Mapped[str | None] = mapped_column(String(36), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
@@ -159,3 +160,47 @@ class FeedState(Base):
     next_refresh_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     report: Mapped[dict] = mapped_column(JSON, default=dict)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class RankingJob(Base):
+    __tablename__ = 'ranking_jobs'
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    user_id: Mapped[str] = mapped_column(ForeignKey('users.id'))
+    company_id: Mapped[str] = mapped_column(ForeignKey('companies.id'))
+    payload: Mapped[dict] = mapped_column(JSON)
+    cache_keys: Mapped[list] = mapped_column(JSON)
+    status: Mapped[str] = mapped_column(String(20), default='queued', index=True)
+    response: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    lease_token: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0, server_default='0')
+
+
+class RelevanceAssessment(Base):
+    __tablename__ = 'relevance_assessments'
+    cache_key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    article_key: Mapped[str] = mapped_column(String(64), index=True)
+    context_key: Mapped[str] = mapped_column(String(64), index=True)
+    company_id: Mapped[str] = mapped_column(ForeignKey('companies.id'), index=True)
+    model_id: Mapped[str] = mapped_column(String(150))
+    version: Mapped[str] = mapped_column(String(80))
+    job_id: Mapped[str] = mapped_column(ForeignKey('ranking_jobs.id'))
+    status: Mapped[str] = mapped_column(String(20), default='queued')
+    result: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class FeedSnapshot(Base):
+    __tablename__ = 'feed_snapshots'
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey('users.id'), index=True)
+    company_id: Mapped[str] = mapped_column(ForeignKey('companies.id'))
+    context_key: Mapped[str] = mapped_column(String(64))
+    query_key: Mapped[str] = mapped_column(String(64))
+    payload: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, index=True)

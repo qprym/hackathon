@@ -24,7 +24,7 @@ def test_live_agent_contract_and_review_retry(client, db, monkeypatch):
             return {'topics':['rates'], 'facts':[{'text':evidence['excerpt'], 'evidence_id':evidence['id']}]}
         if 'Составь план' in system:
             return {'tools':['event_sources','bank_search','verify','shell'], 'queries':['ставка кредит'], 'objective':'Проверить финансирование'}
-        if 'Упорядочь' in system:
+        if 'candidates' in payload:
             return {'ordered_ids':[e['id'] for e in payload['candidates']]}
         if 'Проверь, подтверждаются' in system:
             reviews[0] += 1
@@ -57,7 +57,7 @@ def test_failed_live_verification_hides_personal_interpretation(client, db, monk
             return {'topics':['rates'],'facts':[]}
         if 'Составь план' in system:
             return {'tools':[], 'queries':['кредит']}
-        if 'Упорядочь' in system:
+        if 'candidates' in payload:
             return {'ordered_ids':[]}
         if 'Проверь, подтверждаются' in system:
             return {'issues':['Недоказанное утверждение'],'search_queries':[]}

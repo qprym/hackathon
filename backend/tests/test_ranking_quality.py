@@ -17,9 +17,8 @@ def event(title, documents=None):
 def test_fts_does_not_make_unrelated_commodity_a_direct_exposure():
     steel = context('Производство строительных металлических конструкций', FTS_FLAG=True)
     gold = rank_event(event('Экспорт золота растёт'), steel, 'CFO', as_of=NOW)
-    assert gold['exposure']['level'] == 'indirect'
-    assert gold['score'] < 40
-    assert 'валюты' in gold['reasons'][0]
+    assert gold['exposure']['level'] == 'unknown'
+    assert gold['score'] == 0 and not gold['eligible']
 
 
 def test_diesel_prioritizes_carrier_without_inventing_a_fuel_contract():
@@ -53,3 +52,50 @@ def test_metrics_do_not_mix_demo_latency_or_hide_paid_failures():
     assert values['demo']['latency_avg_seconds'] == 1
     assert values['unknown']['total'] == 1
     assert values['live']['latency_samples'] == 1
+
+
+def test_stale_topics_and_matching_region_do_not_create_a_business_mechanism():
+    company=context('Производство металлопродукции',CL_PRODUCT_LOA_MARK=True,CL_PRODUCT_DEP_MARK=True)
+    company['region']='Москва'
+    unrelated=event('В Москве прошёл концерт')
+    unrelated.topics=['rates','liquidity','commodities']
+    for role in ('CEO','CFO','TREASURER'):
+        result=rank_event(unrelated,company,role,as_of=NOW)
+        assert result['score']==0 and not result['eligible']
+        assert not result['feature_keys']
+
+
+def test_pharma_signal_is_specific_and_role_dependent():
+    pharma=context('Торговля оптовая фармацевтической продукцией',CL_PRODUCT_RKO_MARK=True)
+    flu=event('Рост заболеваемости гриппом: продолжается вакцинация')
+    assert rank_event(flu,pharma,'CEO',as_of=NOW)['score'] > rank_event(flu,pharma,'TREASURER',as_of=NOW)['score']
+    assert not rank_event(flu,context('Производство металлоконструкций'),'CEO',as_of=NOW)['eligible']
+    pharma['features']['FTS_COUNTRY_NAME']={'value':'ИНДИЯ'}
+    assert not rank_event(event('В Индии отбуксировали арестованный нефтяной танкер'),pharma,'CEO',as_of=NOW)['eligible']
+
+
+def test_retail_indicator_is_background_not_corporate_offer():
+    company=context('Производство',CL_PRODUCT_DEP_MARK=True)
+    result=rank_event(event('Ставки по вкладам физических лиц остались без изменений'),company,'TREASURER',as_of=NOW)
+    assert result['eligible'] and result['score']<40 and result['exposure']['level']=='indirect'
+    assert any('не являются корпоративными' in reason for reason in result['reasons'])
+
+
+def test_steel_verb_and_foreign_fuel_do_not_create_domestic_exposure():
+    story=event('Президент Франции договорился о зимних поставках')
+    story.focus_text=story.title+'\nГлавным результатом стали договоренности о поставках дизтоплива во Францию.'
+    assert not rank_event(story,context('Производство металлоконструкций'),'CEO',as_of=NOW)['eligible']
+    assert rank_event(event('Выросли цены на стали различных марок'),context('Производство металлоконструкций'),'CEO',as_of=NOW)['eligible']
+    carrier=context('Деятельность автомобильного грузового транспорта')
+    assert not rank_event(event('Цены на топливо в ЕС выросли'),carrier,'TREASURER',as_of=NOW)['eligible']
+
+
+def test_background_rate_and_bank_only_rules_do_not_match_company():
+    from app.news_focus import source_focus
+    company=context('Производство',CL_PRODUCT_LOA_MARK=True,CL_PRODUCT_DEP_MARK=True)
+    bond=event('ЦБ не ждёт волны дефолтов облигаций')
+    bond.focus_text=source_focus(bond.title,[{'content':'Обсуждаются дефолты на рынке облигаций.\n\nДля справки: ключевая ставка осталась прежней.'}])
+    assert not rank_event(bond,company,'CFO',as_of=NOW)['eligible']
+    for title in ['Требования к отчетности кредитных организаций изменились',
+                  'Малые банки просят отменить социальные вклады физических лиц']:
+        assert not rank_event(event(title),company,'CFO',as_of=NOW)['eligible']

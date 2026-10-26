@@ -81,8 +81,18 @@ type EventItem = {
   published_at: string;
   synthetic: boolean;
   source_count: number;
+  related_publications?: { document_id: string; title: string; publisher: string }[];
+  ranking_method?: string;
+  ranking_status?: string;
+  ordering?: { note: string; repeated_financial_topics: string[] };
+  previous_editions?: { id: string; document_id: string | null; title: string; published_at: string; publisher: string }[];
+  ranking_grounds?: { document_id: string | null; quote: string; publisher: string; location?: string }[];
   exposure: { level: "direct" | "indirect" | "unknown"; note: string };
 };
+type SelectionStatus = { method: string; model: string; total: number; completed: number; queued: number; failed: number; not_requested: number; can_request: boolean };
+type ListSelection = { status: string; version: string; job_id: string | null; historical?: boolean; insufficient?: number };
+type FeedResponse = { items: EventItem[]; topics: Record<string, string>; selection: SelectionStatus; list_selection?: ListSelection | null;
+  feed_version: string; total: number; next_offset: number | null; pipeline: { automatic: boolean; model_available: boolean; provider_mode: string } };
 type Evidence = {
   id: string;
   document_id: string;
@@ -142,7 +152,7 @@ type Source = {
   publisher: string;
   url: string | null;
   synthetic: boolean;
-  ingestion: { coverage?: string; fetched_at?: string; warning?: string; original_file?: string; extraction?: string; date_source?: string };
+  ingestion: { coverage?: string; fetched_at?: string; warning?: string; original_file?: string; extraction?: string; date_source?: string; pages?: { number: number; text_status?: string; visual_status?: string; numeric_tables_status?: string }[] };
   chunks: { page: number | null; text: string }[];
 };
 type FeedStatus = {
@@ -159,7 +169,7 @@ type FeedStatus = {
   }[];
 };
 type Metrics = {
-  llm_allowance: { request_limit: number; requests_used: number; requests_remaining: number; spent_rub: number; test_limit_rub: number };
+  llm_allowance: { request_limit: number; requests_used: number; requests_remaining: number; spent_rub: number; test_limit_rub: number; budget_enforced: boolean; provider_mode: string };
   runs: Record<string, number>;
   feedback: Record<string, number>;
   budgets: { day: string; spent_rub: number }[];
@@ -383,6 +393,40 @@ function Login({ onLogin }: { onLogin: (u: User) => void }) {
   );
 }
 
+function RelationsBrowser({ companyId }: { companyId: string }) {
+  type Row = { id: string; industry: string; region: string; direction: string; amount: number | null; count: number | null; profile_available: boolean; provenance: Record<string, unknown> };
+  type Result = { items: Row[]; total: number; next_offset: number | null };
+  const [query, setQuery] = useState('');
+  const [direction, setDirection] = useState('all');
+  const [offset, setOffset] = useState(0);
+  const [result, setResult] = useState<Result | null>(null);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    let active = true; setResult(null); setError('');
+    api<Result>(`/companies/${companyId}/relations?${new URLSearchParams({ q: query, direction, offset: String(offset), limit: '30' })}`)
+      .then(r => { if (active) setResult(r); }).catch(e => { if (active) setError(String(e.message)); });
+    return () => { active = false; };
+  }, [companyId, query, direction, offset]);
+  return <div className="panel">
+    <h3>Поиск по всем платёжным связям</h3>
+    <p className="muted small">Поиск по доступным профилям. Скрытая отрасль не участвует в поиске; платёж не определяет предмет договора.</p>
+    <label>Отрасль, название или регион<input value={query} onChange={e => { setQuery(e.target.value); setOffset(0); }} /></label>
+    <label>Направление платежей<select value={direction} onChange={e => { setDirection(e.target.value); setOffset(0); }}>
+      <option value="all">Все</option><option value="outgoing">Исходящие</option><option value="incoming">Входящие</option>
+    </select></label>
+    {error && <ErrorBox error={error} />}
+    {!result && !error && <Spinner />}
+    {result?.items.map((r, i) => <div className="connection" key={`${r.id}-${r.direction}-${i}`}>
+      <span>{r.id}<small>{r.profile_available ? `${r.industry} · ${r.region}` : 'Профиль недоступен'} · {r.direction === 'outgoing' ? 'Исходящие' : 'Входящие'}</small>
+        <small>{r.count ?? '—'} платежей · единицы суммы из исходной выборки</small>
+      </span><strong>{r.amount?.toLocaleString('ru-RU') ?? '—'}</strong>
+    </div>)}
+    {result && <p className="muted small">Связей: {result.total}. Показаны {result.items.length ? offset + 1 : 0}–{offset + result.items.length}.</p>}
+    {!!offset && <button className="secondary" onClick={() => setOffset(Math.max(0, offset - 30))}>Предыдущие связи</button>}
+    {result?.next_offset != null && <button className="secondary" onClick={() => setOffset(result.next_offset!)}>Следующие связи</button>}
+  </div>;
+}
+
 function ContextPanel({
   context,
   detailed = false,
@@ -490,6 +534,7 @@ function ContextPanel({
             {context.shared_person_links.map((c) => <div className="connection" key={c.company_id}><Layers3 size={18} /><span>{c.company_id}<small>{c.relation}</small></span></div>)}
             {!context.group.length && !context.shared_person_links.length && <p className="muted">Доступных связанных профилей нет.</p>}
           </div>
+          <RelationsBrowser key={context.id} companyId={context.id} />
         </>
       ) : (
         <div className="insight-note">
@@ -831,11 +876,13 @@ function Analysis({
   onBack,
   onSource,
   onRetry,
+  isAdmin,
 }: {
   runId: string;
   onBack: () => void;
   onSource: (id: string) => void;
   onRetry: (id: string) => void;
+  isAdmin: boolean;
 }) {
   const [run, setRun] = useState<Run | null>(null),
     [error, setError] = useState(""),
@@ -1017,12 +1064,12 @@ function Analysis({
             >
               Источники <span>{new Set(insight.evidence.map((e) => e.document_id)).size}</span>
             </button>
-            <button
+            {isAdmin && <button
               className={tab === "trace" ? "active" : ""}
               onClick={() => setTab("trace")}
             >
-              Как получен вывод <span>{run?.trace.length}</span>
-            </button>
+              Журнал анализа <span>{run?.trace.length}</span>
+            </button>}
           </div>
           {tab === "analysis" && (
             <div className="analysis-layout">
@@ -1251,7 +1298,7 @@ function Analysis({
             </details>
             </>
           )}
-          {tab === "trace" && (
+          {tab === "trace" && isAdmin && (
             <div className="panel trace-panel">
               <h3>Журнал анализа</h3>
               <p className="muted">
@@ -1330,15 +1377,16 @@ function MetricsPanel() {
           ))}
           <p className="form-note">{metrics.quality_note}</p>
           <p className="form-note">Режим не установлен у {metrics.by_mode.unknown.total} запусков; они не включены в показатели LLM и учебных сценариев. Ошибок источников за всё время: {metrics.source_errors}.</p>
-          <a className="text-button" href="/review.html" target="_blank" rel="noreferrer">Открыть форму независимой разметки <ArrowUpRight size={15} /></a>
+          <a className="text-button" href="/review.html" target="_blank" rel="noreferrer">Открыть форму разметки <ArrowUpRight size={15} /></a>
         </div>
         <div className="panel">
-          <h3>Бюджет моделей</h3>
+          <h3>{metrics.llm_allowance.budget_enforced ? "Бюджет удалённого API" : "Локальная модель"}</h3>
+          {!metrics.llm_allowance.budget_enforced && <p>Локальная LLM работает без денежного лимита и квоты тестовых запросов. Ниже сохранена история прежних расходов удалённого API.</p>}
           <div className="context-line"><span>Обращения за весь тест</span><strong>{metrics.llm_allowance.requests_used} / {metrics.llm_allowance.request_limit}</strong></div>
           <div className="context-line"><span>Общий денежный потолок</span><strong>{metrics.llm_allowance.test_limit_rub} ₽</strong></div>
           <div className="context-line"><span>Учтено по тарифам</span><strong>{metrics.llm_allowance.spent_rub.toFixed(3)} ₽</strong></div>
           <p className="form-note">Оценка по настроенным тарифам включает резерв незавершённых запросов. Фактические списания сверяйте в кабинете провайдера; скидки и кеш могут уменьшать стоимость.</p>
-          {!metrics.llm_allowance.test_limit_rub && <p className="form-note">Платные обращения заблокированы до задания денежного лимита.</p>}
+          {metrics.llm_allowance.budget_enforced && !metrics.llm_allowance.test_limit_rub && <p className="form-note">Платные обращения заблокированы до задания денежного лимита.</p>}
           {metrics.budgets.length ? (
             metrics.budgets.map((b) => (
               <div className="context-line" key={b.day}>
@@ -1378,6 +1426,14 @@ function BankLibrary({ onSource }: { onSource: (id: string) => void }) {
 export default function App() {
   const [corpus, setCorpus] = useState<"real" | "synthetic">("real");
   const [feedStatus, setFeedStatus] = useState<FeedStatus | null>(null);
+  const [selection, setSelection] = useState<SelectionStatus | null>(null);
+  const [listSelection, setListSelection] = useState<ListSelection | null>(null);
+  const [selectionBusy, setSelectionBusy] = useState(false);
+  const [feedMeta, setFeedMeta] = useState<FeedResponse | null>(null);
+  const [feedScope, setFeedScope] = useState<"personal" | "all">("personal");
+  const [moreBusy, setMoreBusy] = useState(false);
+  const [feedChanged, setFeedChanged] = useState(false);
+  const currentFeed = useRef<string | null>(null);
   const [user, setUser] = useState<User | null>(null),
     [checking, setChecking] = useState(true),
     [companies, setCompanies] = useState<Company[]>([]),
@@ -1437,10 +1493,11 @@ export default function App() {
     setRunId(null);
     setContext(null);
     setItems([]);
+    currentFeed.current = null; setFeedMeta(null); setFeedChanged(false);
     Promise.all([
       api<Context>(`/companies/${encodeURIComponent(companyId)}/context`),
-      api<{ items: EventItem[]; topics: Record<string, string> }>(
-        `/feed?company_id=${encodeURIComponent(companyId)}&role=${role}&corpus=${corpus}`,
+      api<FeedResponse>(
+        `/feed?company_id=${encodeURIComponent(companyId)}&role=${role}&corpus=${corpus}&q=${encodeURIComponent(search)}&topic=${encodeURIComponent(topic)}&scope=${feedScope}&limit=5`,
       ),
     ])
       .then(([c, f]) => {
@@ -1448,6 +1505,9 @@ export default function App() {
           setContext(c);
           setItems(f.items);
           setTopics(f.topics);
+          setSelection(f.selection);
+          setListSelection(f.list_selection ?? null);
+          setFeedMeta(f); currentFeed.current = f.feed_version;
           const linked = pendingLinkedRun.current;
           if (linked?.company_id === companyId && linked.role === role) {
             setRunId(linked.id);
@@ -1464,7 +1524,7 @@ export default function App() {
     return () => {
       active = false;
     };
-  }, [companyId, role, revision, corpus, companies]);
+  }, [companyId, role, revision, corpus, companies, search, topic, feedScope]);
   useEffect(() => {
     if (!user) return;
     let active = true;
@@ -1476,10 +1536,13 @@ export default function App() {
         const status = await api<FeedStatus>("/feeds/status");
         if (active) setFeedStatus(status);
         if (companyId && page === "feed" && !runId) {
-          const feed = await api<{ items: EventItem[]; topics: Record<string, string> }>(
-            `/feed?company_id=${encodeURIComponent(companyId)}&role=${role}&corpus=${corpus}&q=${encodeURIComponent(search)}&topic=${encodeURIComponent(topic)}`,
+          const feed = await api<FeedResponse>(
+            `/feed?company_id=${encodeURIComponent(companyId)}&role=${role}&corpus=${corpus}&q=${encodeURIComponent(search)}&topic=${encodeURIComponent(topic)}&scope=${feedScope}&limit=5`,
           );
-          if (active) { setItems(feed.items); setTopics(feed.topics); }
+          if (active && currentFeed.current) {
+            setFeedChanged(feed.feed_version !== currentFeed.current);
+            setSelection(feed.selection);
+          }
         }
       } catch { /* Transient refresh errors keep the current view intact. */ }
       finally { pending = false; }
@@ -1487,7 +1550,17 @@ export default function App() {
     void refresh();
     const timer = window.setInterval(() => void refresh(), 15000);
     return () => { active = false; window.clearInterval(timer); };
-  }, [user, companyId, role, corpus, page, runId, revision, search, topic]);
+  }, [user, companyId, role, corpus, page, runId, revision, search, topic, feedScope]);
+  async function loadMore() {
+    if (!feedMeta || feedMeta.next_offset === null || moreBusy) return;
+    const version = currentFeed.current;
+    setMoreBusy(true); setError("");
+    try {
+      const next = await api<FeedResponse>(`/feed?company_id=${encodeURIComponent(companyId)}&role=${role}&corpus=${corpus}&q=${encodeURIComponent(search)}&topic=${encodeURIComponent(topic)}&scope=${feedScope}&limit=5&offset=${feedMeta.next_offset}&feed_version=${encodeURIComponent(feedMeta.feed_version)}`);
+      if (currentFeed.current === version) { setItems(old => [...old, ...next.items]); setFeedMeta(next); }
+    } catch (e) { setError((e as Error).message); }
+    finally { setMoreBusy(false); }
+  }
   useEffect(() => {
     const close = (event: KeyboardEvent) => {
       if (event.key === "Escape") setSource(null);
@@ -1542,11 +1615,7 @@ export default function App() {
       </div>
     );
   if (!user) return <Login onLogin={setUser} />;
-  const filtered = items.filter(
-    (i) =>
-      (!topic || i.topics.includes(topic)) &&
-      (i.title + i.summary).toLowerCase().includes(search.toLowerCase()),
-  );
+  const filtered = items;
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -1705,6 +1774,7 @@ export default function App() {
                 onBack={() => setRunId(null)}
                 onSource={(id) => void openSource(id)}
                 onRetry={setRunId}
+                isAdmin={user.is_admin}
               />
             ) : (
               <>
@@ -1726,6 +1796,38 @@ export default function App() {
                     </span>{feed.error && <span>{feed.error}</span>}</div>
                   </div>)}
                 </div>}
+                {corpus === "real" && selection && <div className="feed-status" aria-label="Нейросетевой отбор">
+                  <div className="feed-status-item">
+                    <Sparkles size={18} />
+                    <div><strong>{selection.model === "deepseek-flash" ? "Отбор DeepSeek" : "Нейросетевой отбор"} · проверено {selection.completed} из {selection.total}</strong>
+                      <span>Полный доступный текст статьи и контекст вашей компании. Все материалы доступны в отдельном режиме поиска.</span>
+                      {!!selection.queued && <span>В очереди: {selection.queued}</span>}
+                      {!!selection.failed && <span>Не прошли предварительную проверку: {selection.failed}.</span>}
+                      {!selection.can_request && <span>На этом стенде доступны сохранённые оценки.</span>}
+                      {listSelection?.status === "completed" && <span><strong>{listSelection.historical ? "Сохранённая короткая подборка дополнена остальными оценёнными материалами. Полный порядок ещё требует проверки моделью." : "Полная лента проверена моделью: приоритетные события вверху, остальные доступны ниже."}</strong></span>}
+                      {listSelection?.status === "stale" && <span>Источники или профиль изменились. Полная подборка ожидает обновления.</span>}
+                      {listSelection && ["queued", "running"].includes(listSelection.status) && <span>Обрабатываем новости и проверяем их применимость…</span>}
+                      {listSelection?.status === "failed" && <span>Подборка не прошла проверку. Сохранённые индивидуальные оценки доступны ниже.</span>}
+                      {listSelection?.status === "not_requested" && <span>Полный сравнительный порядок пока не подготовлен.</span>}
+                      {!!listSelection?.insufficient && <span>Для {listSelection.insufficient} материалов недостаточно данных для оценки применимости.</span>}
+                      {!feedMeta?.pipeline.model_available && <span>Модель на этом стенде не подключена. Доступны сохранённые результаты.</span>}
+                      {feedMeta?.pipeline.automatic && <span>Новые статьи обрабатываются автоматически.</span>}
+                    </div>
+                  </div>
+                  {selection.can_request && user.is_admin && <button className="text-button" disabled={selectionBusy} onClick={async () => {
+                    setSelectionBusy(true); setError("");
+                    try { await api("/ranking", { method: "POST", body: JSON.stringify({ company_id: companyId }) }); setRevision((r) => r + 1); }
+                    catch (e) { setError(e instanceof Error ? e.message : "Не удалось запустить отбор"); }
+                    finally { setSelectionBusy(false); }
+                  }}>{selectionBusy ? "Ставим в очередь…" : "Оценить до 10 последних новостей"}</button>}
+                  {selection.can_request && <button className="text-button" disabled={selectionBusy} onClick={async () => {
+                    setSelectionBusy(true); setError("");
+                    try { await post("/reading-list", {company_id: companyId, retry_failed: true}); setRevision(x => x + 1); }
+                    catch (e) { setError((e as Error).message); }
+                    finally { setSelectionBusy(false); }
+                  }}>Обновить полную ленту</button>}
+                </div>}
+                {feedChanged && <div className="panel" role="status">Есть обновление ленты. Текущий порядок сохранён до обновления. <button className="text-button" onClick={() => setRevision(x => x + 1)}>Показать обновление</button></div>}
                 <div className="overview">
                   <div className="overview-copy">
                     <span className="pill">
@@ -1737,18 +1839,18 @@ export default function App() {
                   <div className="overview-metrics">
                     <div>
                       <strong>
-                        {items.length.toString().padStart(2, "0")}
+                        {(feedMeta?.total ?? items.length).toString().padStart(2, "0")}
                       </strong>
-                      <span>событий в контексте</span>
+                      <span>{search.trim() ? "публикаций найдено" : "событий в контексте"}</span>
                     </div>
                     <div>
                       <strong>
                         {items
-                          .filter((i) => i.score >= 40)
+                          .filter((i) => i.exposure.level === 'direct')
                           .length.toString()
                           .padStart(2, "0")}
                       </strong>
-                      <span>с высоким приоритетом</span>
+                      <span>приоритетных среди показанных</span>
                     </div>
                     <div className="overview-mark">
                       <TrendingUp size={37} />
@@ -1771,6 +1873,11 @@ export default function App() {
                         />
                       </div>
                     </div>
+                    <div className="filters" aria-label="Область поиска">
+                      <button className={feedScope === "personal" ? "active" : ""} onClick={() => setFeedScope("personal")}>Для моей компании</button>
+                      <button className={feedScope === "all" ? "active" : ""} onClick={() => setFeedScope("all")}>Все материалы</button>
+                    </div>
+                    {feedScope === "all" && <p className="muted small">Здесь также есть неоценённые и нерелевантные компании материалы. Их статус указан в карточке.</p>}
                     <div className="filters">
                       <button
                         className={!topic ? "active" : ""}
@@ -1807,11 +1914,13 @@ export default function App() {
                               <span
                                 className={
                                   "priority " +
-                                  (event.score >= 40 ? "high" : "normal")
+                                  (event.exposure.level === 'direct' ? "high" : "normal")
                                 }
                               >
                                 <span />
-                                {event.score >= 40 && event.exposure.level === 'direct'
+                                {event.ranking_method === 'llm' && event.exposure.level === 'unknown'
+                                  ? (event.score === 0 && event.ranking_status === 'completed' ? "Связь не установлена" : "Оценка не готова")
+                                  : event.exposure.level === 'direct'
                                   ? "Высокая значимость"
                                   : event.exposure.level === 'indirect' ? "Косвенная связь" : "В контексте бизнеса"}
                               </span>
@@ -1832,9 +1941,20 @@ export default function App() {
                                 <Sparkles size={15} />
                               </span>
                               <div>
-                                <strong>Почему важно для вас</strong>
+                                <strong>{event.exposure.level === "unknown" ? "Связь с компанией" : "Почему важно для вас"}{event.ranking_method === "llm" && event.ranking_status === "completed" ? " · AI" : ""}</strong>
                                 <p>{event.reasons.slice(0, 2).join(". ")}</p>
-                                <p className="small muted">{event.exposure.note}</p>
+                                {!event.reasons.includes(event.exposure.note) && <p className="small muted">{event.exposure.note}</p>}
+                                {!!event.ordering?.repeated_financial_topics.length && <details className="small">
+                                  <summary>Почему ниже в подборке</summary>
+                                  <p>{event.ordering.note}</p>
+                                </details>}
+                                {!!event.ranking_grounds?.length && <details className="small">
+                                  <summary>Основания отбора</summary>
+                                  {event.ranking_grounds.map((ground, index) => <div key={index}>
+                                    <p>{ground.location === 'title' ? 'Из заголовка: ' : ''}«{ground.quote}»</p>
+                                    {ground.document_id && <button className="text-button" onClick={() => void openSource(ground.document_id!)}>{ground.publisher} · открыть источник</button>}
+                                  </div>)}
+                                </details>}
                               </div>
                             </div>
                             <div className="event-footer">
@@ -1854,6 +1974,24 @@ export default function App() {
                                 <ArrowRight size={16} />
                               </button>
                             </div>
+                            {!!event.related_publications?.length && (
+                              <details className="small">
+                                <summary>Другие публикации об этом событии ({event.related_publications.length})</summary>
+                                {event.related_publications.map((publication) => (
+                                  <button key={publication.document_id} className="text-button" onClick={() => void openSource(publication.document_id)}>
+                                    {publication.title} · {publication.publisher}
+                                  </button>
+                                ))}
+                              </details>
+                            )}
+                            {!!event.previous_editions?.length && <details className="small">
+                              <summary>Предыдущие выпуски ({event.previous_editions.length})</summary>
+                              <p className="muted">В подборке показан последний оценённый выпуск. Исторические публикации сохранены отдельно.</p>
+                              {event.previous_editions.map((edition) => edition.document_id ?
+                                <button key={edition.id} className="text-button" onClick={() => void openSource(edition.document_id!)}>
+                                  {date(edition.published_at)} · {edition.title}
+                                </button> : <p key={edition.id}>{date(edition.published_at)} · {edition.title}</p>)}
+                            </details>}
                           </article>
                         ))}
                       </div>
@@ -1862,14 +2000,12 @@ export default function App() {
                         <Search size={30} />
                         <h3>Пока нет подходящих событий</h3>
                         <p>
-                          {corpus === "real" && !items.length
-                            ? feedStatus?.automatic === false
-                              ? "Автообновление отключено. Администратор может загрузить новости в разделе «Источники и импорт»."
-                              : "Новости появятся здесь после обработки. Состояние автоматической загрузки показано выше."
-                            : "Измените фильтр или загрузите материал в разделе источников."}
+                          В персональную ленту попадают новости с применимой связью с профилем и ролью.
+                          Измените фильтр или переключитесь на все материалы. Поиск учитывает полный сохранённый текст.
                         </p>
                       </div>
                     )}
+                    {feedMeta?.next_offset != null && <button className="text-button" disabled={moreBusy} onClick={() => void loadMore()}>{moreBusy ? "Загружаем…" : `Показать ещё · ${items.length} из ${feedMeta.total}`}</button>}
                   </section>
                   <aside className="context-aside">
                     <ContextPanel context={context} />
@@ -1931,6 +2067,15 @@ export default function App() {
             {source.ingestion?.warning && <p className="muted small">{source.ingestion.warning}</p>}
             {source.ingestion?.date_source && <p className="muted small">Основание даты: {source.ingestion.date_source}</p>}
             {source.ingestion?.original_file && <a className="text-button" href={`/api/sources/${source.id}/original`} target="_blank" rel="noopener noreferrer">Скачать оригинальный PDF <ExternalLink size={16} /></a>}
+            {source.ingestion?.original_file && <div className="context-note">
+              <span>Графики и таблицы требуют сверки с оригиналом. Числа из неподтверждённых графических фрагментов не являются основанием расчёта.</span>
+            </div>}
+            {!!source.ingestion?.pages?.length && <details className="panel">
+              <summary>Качество извлечения по страницам</summary>
+              {source.ingestion.pages.map(p => <p className="muted small" key={p.number}>
+                Стр. {p.number} · {p.text_status === 'empty' ? 'текст не извлечён' : p.text_status === 'ocr' ? 'текст распознан OCR' : 'доступен текст'} · графики: {p.visual_status === 'verified' ? 'проверены' : 'не проверены'} · таблицы: {p.numeric_tables_status === 'verified' ? 'проверены' : 'не проверены'}
+              </p>)}
+            </details>}
             <div className="source-content">{source.content}</div>
             {source.url && /^https?:\/\//.test(source.url) && (
               <a

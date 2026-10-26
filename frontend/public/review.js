@@ -80,6 +80,8 @@ $('file').addEventListener('change',async event=>{
     if(!Array.isArray(loaded.claims)&&(!Array.isArray(loaded.events)||loaded.companies?.length!==3||!loaded.contexts))throw Error('Неизвестная структура набора.');
     if(loaded.events?.some(e=>!e.relevance||!Array.isArray(e.sources)))throw Error('В наборе отсутствуют оценки или источники.');
     data=loaded;filename=file.name;changed=false;$('error').textContent='';$('reviewer').value=data.reviewer||'';$('save').disabled=false;
+    $('provenance').hidden=data.reviewer_kind!=='ai';
+    $('provenance').textContent='Предварительная AI-разметка. Это не независимая экспертная проверка. Редактирование и смена имени сохраняют происхождение оценок; для независимой разметки используйте исходный пустой набор.';
     if(!claimsMode())options($('company'),data.companies.map(c=>[c,c+' · '+(data.contexts[c]?.industry||'')]));
     refreshRecords();
   }catch(e){$('error').textContent=e.message;}

@@ -30,7 +30,7 @@ Main third-party components (licenses must be rechecked when upgrading):
 Resolved dependencies: backend/requirements.lock, frontend/package-lock.json.
 Package distributions retain their own notices and license files.
 
-LLMs allowed by the case, accessed only through the organizer's external API:
+LLM display names allowed by the case (provider or locally served weights):
 Gemma 4 26B A4B; GLM-5.3-Flash; Qwen3.6 35B A3B;
 DeepSeek-V4.1-Flash; Qwen3-VL-30B-A3B-Instruct; Kimi-K2.6.
 No model weights are redistributed. Provider terms, model licenses, API IDs
@@ -49,8 +49,14 @@ Synthetic datasets and simulated integrations:
 - data/evaluation/events.json: synthetic evaluation scaffold, unreviewed labels.
 - Internet banking UI and logins simulate a corporate bank cabinet.
 - CSVs from the organizer, actual Alfa-Bank research, bank SSO, payment systems,
-  actual model API and an external deployment are not bundled.
+  model credentials/weights and an external deployment are not bundled.
 - Lexical retrieval, scoring and demo interpretations are project-owned rules.
 - Locally downloaded organizer files and OCR results reside in ignored data/private/;
   original imported PDFs persist in the source_files Docker volume. The repository
   contains only the source/date manifest and import tools, not those case documents.
+
+Current serving paths (2026-10-26): real-news selection and semantic merging use
+reviewed LLM outputs; lexical similarity proposes candidates only. Synthetic demo
+interpretations use explicit rules. Historical DeepSeek responses remain labelled
+as historical; local-model quality has not yet been evaluated. AI-created relevance
+labels are internal development material, not independent expert certification.

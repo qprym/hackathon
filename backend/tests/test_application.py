@@ -140,6 +140,26 @@ def test_cache_invalidates_on_bank_material_change(client, db):
     assert start(client) != first
 
 
+def test_unrelated_news_does_not_force_another_analysis(client,db):
+    first=start(client);process_one()
+    import_document(db,title='Другой источник о культурном событии',content='Отдельная новость без связи с исходным событием. '*4,
+                    kind='news',publisher='Редакция',published_at=utcnow(),synthetic=True)
+    assert start(client)==first
+
+
+def test_preview_opens_only_matching_live_cache(client,db,monkeypatch):
+    doc,_=import_document(db,title='Реальная тестовая статья',content='Полный публичный материал для проверки кеша. '*4,
+                         kind='news',publisher='Редакция',published_at=utcnow(),synthetic=False)
+    event=next(e for e in db.scalars(select(Event)) if doc.id in e.document_ids)
+    body={'company_id':'demo-metal','event_id':event.id,'role':'CFO'}
+    monkeypatch.setattr(settings(),'demo_mode',False)
+    run_id=client.post('/api/analyses',json=body).json()['run_id']
+    run=db.get(Run,run_id);run.status='completed';run.result={'mode':'live'};db.commit()
+    monkeypatch.setattr(settings(),'demo_mode',True);monkeypatch.setattr(settings(),'preview_cached_only',True)
+    assert client.post('/api/analyses',json=body).json()=={'run_id':run_id,'cached':True}
+    assert client.post('/api/analyses',json={**body,'role':'CEO'}).status_code==409
+
+
 def test_missing_bank_triggers_research_and_explicit_limitation(client, db):
     for doc in db.scalars(select(Document).where(Document.kind=='bank')).all():
         db.delete(doc)

@@ -64,6 +64,8 @@ def test_rss_to_real_feed_analysis_and_source(client, db, monkeypatch):
     assert db.scalar(select(func.count()).select_from(Document).where(Document.synthetic.is_(False))) == 1
     feed = client.get('/api/feed?company_id=demo-retail&role=TREASURER').json()
     assert feed['corpus'] == 'real'
+    assert not feed['items'] and feed['selection']['not_requested']==1
+    feed=client.get('/api/feed',params={'company_id':'demo-retail','role':'TREASURER','q':TITLE}).json()
     assert len(feed['items']) == 1 and not feed['items'][0]['synthetic']
     event_id = feed['items'][0]['id']
     run_id = client.post('/api/analyses', json={'company_id':'demo-retail', 'event_id': event_id, 'role':'TREASURER'}).json()['run_id']

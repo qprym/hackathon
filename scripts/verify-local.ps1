@@ -29,6 +29,8 @@ try {
     } finally { Pop-Location }
     & (Join-Path $taskRoot '.venv/Scripts/python.exe') scripts/verify_recovery.py --project $taskProject
     if ($LASTEXITCODE -ne 0) { throw 'Queue recovery check failed' }
+    & (Join-Path $taskRoot '.venv/Scripts/python.exe') scripts/verify_backup.py --project $taskProject
+    if ($LASTEXITCODE -ne 0) { throw 'Backup restore check failed' }
     Write-Output "Verified isolated project: $taskProject on http://localhost:8081"
 } finally {
     $env:E2E_BASE_URL = $taskOldBase

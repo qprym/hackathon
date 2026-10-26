@@ -1,0 +1,17 @@
+# Apply after compose.verify.yaml. Historical usage stays visible; no provider credentials.
+services:
+  migrate:
+    environment: &preview-env
+      LLM_REQUEST_LIMIT: "161"
+      LLM_TEST_LIMIT_RUB: "100"
+      LLM_DAILY_LIMIT_RUB: "100"
+      LLM_ANALYSIS_MODEL: DeepSeek-V4.1-Flash
+      LLM_ANALYSIS_ID: deepseek-flash
+      NEURAL_RANKING_WORKER: "false"
+      PREVIEW_CACHED_ONLY: "true"
+      LLM_EXTRACTION_MODEL: DeepSeek-V4.1-Flash
+      LLM_EXTRACTION_ID: deepseek-flash
+  api:
+    environment: *preview-env
+  worker:
+    environment: *preview-env

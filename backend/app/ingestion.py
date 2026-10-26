@@ -98,10 +98,12 @@ def import_document(db, *, title, content, kind, publisher, published_at, url=No
         candidates = db.scalars(select(Event).where(Event.synthetic == synthetic,
             Event.published_at.between(published_at - timedelta(days=2), published_at + timedelta(days=2)))).all()
         for candidate in candidates:
-            # Conservative grouping: numeric anchors must agree; differing reports stay separate.
-            numbers_match = re.findall(r"\d+(?:[.,]\d+)?", candidate.title) == re.findall(r"\d+(?:[.,]\d+)?", title)
-            similarity = SequenceMatcher(None, candidate.title.lower(), title.lower()).ratio()
-            if numbers_match and similarity > .88:
+            # Only the same publisher URL is an identity. Semantic merging is model-reviewed later.
+            same_publication = any(
+                (source:=db.get(Document,key)) and ((bool(url) and source.url==url and source.publisher==publisher)
+                or (source.content==text and source.title==title and source.published_at==published_at))
+                for key in candidate.document_ids)
+            if same_publication:
                 event = candidate
                 break
         if event:
@@ -249,11 +251,15 @@ def extract_pdf(raw, with_pages=False):
         if n in recognized:
             text = clean_text(recognized[n]['text'])
         texts.append(text)
-        pages.append({'number': n, 'text': text, 'confidence': recognized[n]['confidence'] if n in recognized else 100})
+        pages.append({'number': n, 'text': text, 'confidence': recognized[n]['confidence'] if n in recognized else 100,
+            'text_status':'empty' if not text.strip() else 'ocr' if n in recognized else 'extracted',
+            'visual_status':'not_verified','numeric_tables_status':'not_verified'})
         page_chunks = pdf_chunks(text, n)
         for chunk in page_chunks:
             chunk['extraction'] = 'ocr' if n in recognized else 'text'
             chunk['confidence'] = recognized[n]['confidence'] if n in recognized else None
+            chunk['visual_status'] = 'not_verified'
+            chunk['numeric_tables_status'] = 'not_verified'
         chunks.extend(page_chunks)
     if sum(map(len, texts)) < 100:
         raise ValueError("В PDF нет извлекаемого текста. Нужен текстовый PDF или предварительное распознавание разрешенной моделью.")
@@ -319,7 +325,7 @@ def extract_article(raw, key):
         raise ValueError("Нет адаптера источника")
     if len(text) < 100:
         raise ValueError("Не найден достаточный текст статьи на странице")
-    return text[:100_000], {"coverage": "article", "method": selector}
+    return text, {"coverage": "article", "method": selector}
 
 
 def import_feed(db, key, on_progress=None):

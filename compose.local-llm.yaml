@@ -1,0 +1,25 @@
+# Connect an already running local OpenAI-compatible model server; no remote API key.
+services:
+  migrate:
+    environment: &local-model
+      DEMO_MODE: "false"
+      LLM_PROVIDER_MODE: local
+      LLM_BASE_URL: ${LOCAL_LLM_BASE_URL:-http://host.docker.internal:8001/v1}
+      LLM_API_KEY: ""
+      LLM_LOCAL_API_KEY: ${LOCAL_LLM_API_KEY:-}
+      LLM_ANALYSIS_MODEL: ${LOCAL_LLM_MODEL_NAME:-Qwen3.6 35B A3B}
+      LLM_ANALYSIS_ID: ${LOCAL_LLM_MODEL_ID:?Set the model ID served by your local inference server}
+      LLM_EXTRACTION_MODEL: ${LOCAL_LLM_MODEL_NAME:-Qwen3.6 35B A3B}
+      LLM_EXTRACTION_ID: ${LOCAL_LLM_MODEL_ID:?Set the model ID served by your local inference server}
+      LLM_TIMEOUT_SECONDS: ${LOCAL_LLM_TIMEOUT_SECONDS:-600}
+      NEURAL_RANKING_WORKER: "true"
+      AUTO_PERSONALIZATION: "true"
+      ACTIVE_COMPANY_IDS: ${ACTIVE_COMPANY_IDS:-U_26491,U_989,U_6923}
+      LLM_MODEL_REVISION: ${LOCAL_LLM_MODEL_REVISION:-}
+      LLM_CONTEXT_CHARACTERS: ${LOCAL_LLM_CONTEXT_CHARACTERS:-120000}
+  api:
+    environment: *local-model
+    extra_hosts: ["host.docker.internal:host-gateway"]
+  worker:
+    environment: *local-model
+    extra_hosts: ["host.docker.internal:host-gateway"]

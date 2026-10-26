@@ -38,6 +38,12 @@ def initialize_development_schema():
         columns = {column['name'] for column in inspect(connection).get_columns('documents')}
         if 'ingestion_meta' not in columns:
             connection.execute(text("ALTER TABLE documents ADD COLUMN ingestion_meta JSON NOT NULL DEFAULT '{}'"))
+        for table in ('runs','ranking_jobs'):
+            columns = {column['name'] for column in inspect(connection).get_columns(table)}
+            if 'lease_token' not in columns:
+                connection.execute(text(f'ALTER TABLE {table} ADD COLUMN lease_token VARCHAR(36)'))
+            if table=='ranking_jobs' and 'attempts' not in columns:
+                connection.execute(text('ALTER TABLE ranking_jobs ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0'))
 
 
 def get_db():

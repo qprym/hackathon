@@ -1,7 +1,7 @@
 """Conservative, inspectable subject matching; no model or network calls."""
 import re
 
-SEARCH_VERSION = 'bank-subject-v1'
+SEARCH_VERSION = 'bank-sections-v2'
 
 # Match subjects, not publication names. A gold report can contain a useful fuel
 # paragraph; its title alone can neither admit nor veto that paragraph.

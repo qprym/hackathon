@@ -1,4 +1,4 @@
-"""Evaluate independent factual labels; historical versions cannot pass current acceptance."""
+"""Evaluate factual labels; AI and historical reviews cannot pass independent acceptance."""
 import argparse
 import json
 from pathlib import Path
@@ -13,11 +13,15 @@ def evaluate_claims(data):
         complete = bool(items) and not missing and bool(data.get('reviewer')) and bool(data.get('reviewed_at'))
         return {'claims':len(items), 'missing_labels':missing,
                 'supported_fraction':sum(c['supported'] for c in items)/len(items) if complete else None}
-    result = {'current':group(current),'historical':group(historical),
+    kind = data.get('reviewer_kind', 'human')
+    independent = kind == 'human' and data.get('independent', True) is True
+    result = {'reviewer_kind':kind,'independent':independent,
+              'current':group(current),'historical':group(historical),
               'scenarios_excluded_from_factual_metric':len(data['claims'])-len(facts)}
     rate = result['current']['supported_fraction']
     result.update(status='reviewed' if rate is not None else 'historical_only' if historical and result['historical']['supported_fraction'] is not None else 'incomplete',
-                  target_met=rate >= .95 if rate is not None else None)
+                  acceptance_eligible=independent and rate is not None,
+                  target_met=rate >= .95 if rate is not None and independent else None)
     return result
 
 

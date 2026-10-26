@@ -8,6 +8,9 @@ os.environ["DEMO_MODE"] = "true"
 os.environ["SEED_DEMO"] = "true"
 os.environ["AUTO_FETCH_RSS"] = "false"
 os.environ["LLM_API_KEY"] = "test-key-never-use-provider"
+os.environ["LLM_REQUEST_LIMIT"] = "20"
+os.environ["LLM_TEST_LIMIT_RUB"] = "0"
+os.environ["NEURAL_RANKING_WORKER"] = "false"
 
 from fastapi.testclient import TestClient
 from app.main import app

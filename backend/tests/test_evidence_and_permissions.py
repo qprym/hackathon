@@ -37,7 +37,7 @@ def test_inaccessible_profiles_never_enter_live_model_context(client, db, monkey
             return {'topics': [], 'facts': []}
         if 'Составь план' in system:
             return {'tools': ['related_companies'], 'queries': ['ставка кредит']}
-        if 'Упорядочь' in system:
+        if 'candidates' in payload:
             return {'ordered_ids': []}
         if 'Проверь, подтверждаются' in system:
             return accepted_review(payload)

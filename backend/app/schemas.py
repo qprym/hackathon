@@ -5,6 +5,17 @@ from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 Role = Literal["CEO", "CFO", "TREASURER"]
 
 
+class FeedPage(BaseModel):
+    model_config = ConfigDict(extra='allow')
+    items: list[dict] = Field(description='Карточки в персональном порядке с reasons, ranking_grounds и applicability')
+    feed_version: str = Field(description='Неизменяемый снимок на 24 часа, привязанный к пользователю, контексту и фильтрам')
+    total: int
+    offset: int
+    next_offset: int | None
+    list_selection: dict | None = Field(default=None,description='Состояние обработки и версия полного отбора')
+    pipeline: dict = Field(default_factory=dict,description='Автоматическая обработка и доступность настроенной модели')
+
+
 class Login(BaseModel):
     username: str = Field(min_length=1, max_length=100)
     password: str = Field(min_length=1, max_length=200)

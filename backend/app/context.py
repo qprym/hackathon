@@ -1,6 +1,36 @@
 from sqlalchemy import or_, select
 from .models import Company, Link
 
+
+def related_context(db, company, allowed_company_ids, *, query='', direction='all', offset=0, limit=30):
+    """Search the complete relationship set without disclosing inaccessible profiles."""
+    allowed=set(allowed_company_ids)
+    if company.id not in allowed:raise PermissionError('Нет доступа к компании')
+    stmt=select(Link).where(Link.kind=='payment',Link.source_id!=Link.target_id,
+        or_(Link.source_id==company.id,Link.target_id==company.id))
+    if direction=='outgoing':stmt=stmt.where(Link.source_id==company.id)
+    if direction=='incoming':stmt=stmt.where(Link.target_id==company.id)
+    links=db.scalars(stmt.order_by(Link.amount.desc(),Link.id)).all()
+    other_ids={l.target_id if l.source_id==company.id else l.source_id for l in links}&allowed
+    profiles={c.id:c for c in db.scalars(select(Company).where(Company.id.in_(other_ids),Company.synthetic==company.synthetic))} if other_ids else {}
+    rows=[];aliases={};needle=query.strip().casefold()
+    for link in links:
+        other_id=link.target_id if link.source_id==company.id else link.source_id
+        other=profiles.get(other_id)
+        alias=aliases.setdefault(other_id,'Контрагент '+str(len(aliases)+1))
+        # Search uses only the information the caller is permitted to read.
+        if needle and (not other or needle not in ' '.join((other.name,other.industry,other.region)).casefold()):continue
+        rows.append({'id':other_id if other_id in allowed else alias,'profile_available':bool(other),
+            'industry':other.industry if other else 'Неизвестна','region':other.region if other else 'Неизвестен',
+            'features':other.features if other else {},'direction':'outgoing' if link.source_id==company.id else 'incoming',
+            'amount':link.amount,'count':link.count,'provenance':link.details,
+            'limitation':'Платёжная связь не устанавливает поставщика, покупателя или предмет договора.'})
+    group=db.scalars(select(Company).where(Company.group_id==company.group_id,Company.id.in_(allowed),Company.synthetic==company.synthetic)).all() if company.group_id else []
+    return {'items':rows[offset:offset+limit],'total':len(rows),'offset':offset,
+        'next_offset':offset+limit if offset+limit<len(rows) else None,'query':query,'direction':direction,
+        'group':[{'id':c.id,'industry':c.industry,'region':c.region,'features':c.features} for c in group],
+        'scope':'Только предоставленные связи и доступные профили; суммы в неподтверждённых единицах набора.'}
+
 PRODUCTS = {
     "CL_PRODUCT_LOA_MARK": "Кредитные продукты", "CL_PRODUCT_DEP_MARK": "Депозиты",
     "CL_PRODUCT_GAR_MARK": "Банковские гарантии", "CL_PRODUCT_LEA_MARK": "Лизинг",

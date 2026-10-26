@@ -7,6 +7,8 @@ from sqlalchemy import select
 
 root = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(root / 'backend'))
+sys.path.insert(0, str(root / 'scripts'))
+from sample_evaluation import sample
 from app.context import company_context
 from app.db import SessionLocal, utcnow
 from app.models import Company, Document, Event, Run
@@ -27,16 +29,9 @@ def build_bundle(db, company_ids, excluded_ids=(), *, as_of=None):
     contexts = {c.id: company_context(db, c, company_ids) for c in companies}
     used = set(db.scalars(select(Run.event_id)).all()) | set(excluded_ids)
     events = db.scalars(select(Event).where(Event.synthetic.is_(False), Event.published_at <= as_of,
-        Event.id.not_in(used)).order_by(Event.published_at.desc(), Event.id).limit(500)).all()
-    selected, seen_docs, seen_titles = [], set(), set()
-    excluded_events = db.scalars(select(Event).where(Event.id.in_(used))).all() if used else []
-    for e in excluded_events:
-        seen_docs.update(e.document_ids)
-        seen_titles.add(' '.join(e.title.casefold().split()))
+        ).order_by(Event.published_at.desc(), Event.id).limit(500)).all()
+    selected = []
     for event in events:
-        title_key = ' '.join(event.title.casefold().split())
-        if title_key in seen_titles or seen_docs.intersection(event.document_ids):
-            continue
         documents = db.scalars(select(Document).where(Document.id.in_(event.document_ids),
                                                      Document.synthetic.is_(False))).all()
         if not documents:
@@ -49,19 +44,14 @@ def build_bundle(db, company_ids, excluded_ids=(), *, as_of=None):
                          'coverage':(d.ingestion_meta or {}).get('coverage', 'unknown')} for d in documents],
             'relevance': {f'{key}:{role}': None for key in company_ids for role in ROLES},
             'comments': {}})
-        seen_docs.update(event.document_ids)
-        seen_titles.add(title_key)
-        if len(selected) == 50:
-            break
-    if len(selected) < 50:
-        raise ValueError('Need 50 unseen real events with source text after exclusions')
     dataset = {'schema_version': 2, 'status': 'real-unreviewed', 'reviewer': None, 'reviewed_at': None,
         'exported_at': as_of.isoformat(), 'ranking_as_of': as_of.isoformat(), 'ranking_version': RANKING_VERSION,
         'companies': company_ids, 'contexts': contexts, 'events': selected,
-        'sampling': {'excluded_events': sorted(used), 'method':'Newest unseen events; newest 20 locked for holdout; next 30 development'},
         'rubric': {'0':'Нет применимой связи с компанией и ролью','1':'Косвенная, но полезная связь',
                    '2':'Приоритетная новость с конкретным механизмом влияния'},
         'instructions': 'Оценивайте по источнику и профилю, не по порядку ленты. Сначала development; holdout после фиксации ранжирования. Пустая оценка — недостаточно данных, не ноль.'}
+    dataset = sample({'as_of':as_of.isoformat(),'events':selected,'run_event_ids':sorted(used)},dataset,used)
+    dataset['ranking_version'] = RANKING_VERSION
     claims, seen_profiles = [], set()
     for run in db.scalars(select(Run).where(Run.company_id.in_(company_ids), Run.status=='completed')
                          .order_by(Run.created_at.desc(), Run.id)):

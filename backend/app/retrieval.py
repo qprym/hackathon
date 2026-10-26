@@ -5,7 +5,10 @@ from .db import utcnow
 from .models import Document, Event
 from .bank_relevance import SEARCH_VERSION, subject_match, subjects, words
 
-RANKING_VERSION = 'context-subject-v2'
+from .personalization import RANKING_VERSION, rank
+
+NEWS_CONTEXT_VERSION = 'complete-articles-v2'
+NEWS_FRAGMENT_CHARS = 1500
 
 TOPICS = {
     "rates": ("ставк", "кредит", "процент", "рефинанс", "денежно-кредит"),
@@ -42,67 +45,7 @@ def tokens(text):
 
 
 def rank_event(event, context, role, *, as_of=None):
-    features = context["features"]
-    has = lambda k: features.get(k, {}).get("value") is True
-    topics = set(event.topics)
-    commodity = subjects(event.title) - {'policy_rate', 'deposit_rates', 'interest_rates'}
-    industry_subjects = subjects(context['industry'])
-    if re.search(r'металлоконструк|металлопрокат|черн\w* металл', context['industry'], re.I):
-        industry_subjects.add('steel')
-    subject_link = bool(commodity & industry_subjects)
-    direct = False
-    score, reasons, keys = 0.0, [], []
-    def add(points, reason, key):
-        nonlocal score
-        score += points
-        reasons.append(reason)
-        keys.append(key)
-    if "rates" in topics and has("CL_PRODUCT_LOA_MARK"):
-        add(30, "Есть кредитные продукты: важны условия финансирования", "CL_PRODUCT_LOA_MARK")
-        direct = not commodity
-    if "rates" in topics and has("CL_PRODUCT_DEP_MARK"):
-        add(16, "Есть депозиты: важна доходность размещения средств", "CL_PRODUCT_DEP_MARK")
-        direct = direct or not commodity
-    if "fx" in topics and has("FTS_FLAG"):
-        add(6 if commodity else 18, "Есть сведения ФТС; товары, валюты и направления операций неизвестны", "FTS_FLAG")
-    sector = classify(context["industry"])
-    for topic in topics.intersection(sector):
-        if commodity and not subject_link and topic != 'logistics':
-            continue
-        add(20, f"Связь с деятельностью: {TOPIC_NAMES[topic].lower()}", "MAINOKVED_NAME")
-        direct = direct or not commodity or subject_link
-    if commodity & {'diesel', 'gasoline', 'fuel'} and re.search(r'перевоз|автомобильн\w*\s+(?:грузов\w*\s+)?транспорт', context['industry'], re.I):
-        add(2 if 'logistics' in topics else 22,
-            "Топливо может влиять на затраты перевозчика; состав парка, договоры и доля затрат неизвестны", "MAINOKVED_NAME")
-    if subject_link:
-        add(16, "Предмет новости связан с указанным видом деятельности", "MAINOKVED_NAME")
-        direct = True
-    if "logistics" in topics and 'logistics' not in sector and any(t in context["industry"].lower() for t in ("производ", "торгов", "перевоз")):
-        add(6, "Возможна косвенная связь через движение товаров; конкретные маршруты и грузы неизвестны", "MAINOKVED_NAME")
-    concentration = features.get("outgoing_concentration", {}).get("value", 0)
-    if topics.intersection({"logistics", "liquidity"}) and concentration > .5 and not commodity:
-        add(10, "Исходящие платежи сконцентрированы на одном контрагенте", "outgoing_concentration")
-    related = [c for c in context.get("counterparties", []) if topics.intersection(classify(c["industry"]))]
-    if related and not commodity:
-        add(6, "Тема затрагивает отрасли связанных платежами компаний", "counterparty_count")
-    if context["region"].lower() not in ("не указан", "") and context["region"].lower() in event.title.lower():
-        add(14, "Событие относится к региону регистрации", "REGION")
-    exposure = 'direct' if direct else ('indirect' if keys else 'unknown')
-    note = ('Есть связь с признаками профиля; величина финансового эффекта не установлена.' if direct else
-            'Косвенная связь; конкретный товар, объём операций и механизм влияния нужно уточнить.' if commodity and keys else
-            'Косвенная связь по профилю; применимость события нужно уточнить.' if keys else
-            'Прямая связь с компанией по доступным признакам не установлена.')
-    role_score = sum(ROLE_WEIGHTS[role].get(t, 0) for t in topics)
-    score += min(role_score, 18)
-    if role_score:
-        reasons.append(f"Соответствует приоритетам роли {role}")
-    age = max(((as_of or utcnow()) - event.published_at).total_seconds() / 86400, 0)
-    score += max(0, 8 - age / 3)
-    # RSS and full text of the same article are not independent corroboration.
-    ceiling = 100 if direct else 39 if keys else 24
-    return {"score": round(min(score, ceiling), 1), "reasons": reasons or [note],
-            "feature_keys": list(dict.fromkeys(keys)), 'exposure': {'level': exposure, 'note': note},
-            'ranking_version': RANKING_VERSION}
+    return rank(event, context, role, as_of=as_of)
 
 
 def search_documents(db, query, kind=None, before=None, synthetic=False, limit=6, focus=None):
@@ -121,7 +64,9 @@ def search_documents(db, query, kind=None, before=None, synthetic=False, limit=6
         tsquery = func.websearch_to_tsquery('russian', query)
         candidates.extend(db.scalars(stmt.where(vector.op('@@')(tsquery)).order_by(
             func.ts_rank_cd(vector, tsquery).desc()).limit(30)).all())
-    candidates.extend(db.scalars(stmt.order_by(Document.published_at.desc()).limit(500)).all())
+    # Bank library must remain searchable beyond the newest 500 pages/documents.
+    candidates.extend(db.scalars(stmt.order_by(Document.published_at.desc()) if kind=='bank'
+        else stmt.order_by(Document.published_at.desc()).limit(500)).all())
     unique = {d.id: d for d in candidates}
     scored = []
     for doc in unique.values():
@@ -130,6 +75,8 @@ def search_documents(db, query, kind=None, before=None, synthetic=False, limit=6
                 continue
             if kind == 'bank':
                 body = chunk['text']
+                if chunk.get('content_type') in ('table','chart') and not chunk.get('numeric_verified'):
+                    continue
                 if chunk.get('extraction') == 'ocr' and (not re.match(r'^[А-ЯЁA-Z]', body) or not re.search(r'[.!?:;]$', body)):
                     continue
                 if len(re.findall(r'[а-яёa-z]{3,}', body.lower())) < 15:
@@ -189,13 +136,68 @@ def evidence(doc, index, chunk):
             "excerpt": chunk["text"], "page": chunk.get("page"), "synthetic": doc.synthetic,
             "coverage": doc.ingestion_meta.get("coverage", "provided"),
             "extraction": chunk.get('extraction', 'text'), "confidence": chunk.get('confidence'),
-            "date_kind": doc.ingestion_meta.get('date_kind','publication'), "date_source":doc.ingestion_meta.get('date_source')}
+            "date_kind": doc.ingestion_meta.get('date_kind','publication'), "date_source":doc.ingestion_meta.get('date_source'),
+            'visual_status':chunk.get('visual_status','not_verified') if doc.kind=='bank' else None,
+            'numeric_tables_status':chunk.get('numeric_tables_status','not_verified') if doc.kind=='bank' else None,
+            'content_type':chunk.get('content_type','text'),'numeric_verified':chunk.get('numeric_verified',False)}
 
 
-def event_evidence(db, event):
-    result = []
-    for doc_id in event.document_ids:
-        doc = db.get(Document, doc_id)
-        if doc:
-            result.extend(evidence(doc, i, chunk) for i, chunk in enumerate(doc.chunks[:3]))
-    return result[:8]
+def bank_query_variants(query):
+    """Broaden recall; these words never decide final applicability."""
+    variants=[query]
+    for pattern,expansion in (
+        (r'дизел|топлив','дизельное топливо нефтепереработка нефтепродукты'),
+        (r'металл|\bстал[ьи]\b|конструкц','металлопрокат сталь строительство'),
+        (r'фарм|лекарств','фармацевтика лекарства дистрибуция'),
+        (r'ставк|финансирован','денежно-кредитная политика стоимость фондирования')):
+        if re.search(pattern,query,re.I):variants.append(expansion)
+    return variants
+
+
+def bank_sections(db,queries,event,limit=12):
+    found={};scores={}
+    variants=dict.fromkeys(v for q in queries for v in bank_query_variants(q))
+    for variant in variants:
+        for rank,item in enumerate(search_documents(db,variant,kind='bank',before=event.published_at,
+                synthetic=event.synthetic,limit=limit,focus=event.title),1):
+            found.setdefault(item['id'],item)
+            scores[item['id']]=scores.get(item['id'],0)+1/(60+rank)
+    ordered=sorted(found.values(),key=lambda e:(e.get('relevance',{}).get('level')!='direct',-scores[e['id']],e['id']))
+    return ordered[:limit]
+
+
+def expand_bank_pages(db,evidence_items):
+    """Give the selector paragraph context from the same original page, with exact provenance."""
+    expanded=[]
+    for item in evidence_items:
+        doc=db.get(Document,item['document_id']);page=item.get('page')
+        original=next((p.get('text') for p in doc.ingestion_meta.get('pages',[]) if p.get('number')==page),None) if doc and page else None
+        if not original and doc and page:
+            chunks=[c for c in doc.chunks if c.get('page')==page and (c.get('extraction')!='ocr' or c.get('confidence',0)>=65)]
+            original='\n\n'.join(c['text'] for c in sorted(chunks,key=lambda c:c.get('offset',0)))
+        # Keep the selected cited excerpt unchanged; extra context cannot become an unanchored citation.
+        expanded.append({**item,'page_context':original or item['excerpt']})
+    return expanded
+
+
+def event_evidence(db, event, document_ids=None):
+    # Splitting provides exact citations; it never limits the input article.
+    # A provider/context/budget error must stop the run, never shorten its text.
+    docs=[doc for key in (document_ids or event.document_ids) if (doc:=db.get(Document,key)) and doc.synthetic==event.synthetic]
+    docs.sort(key=lambda d:(d.ingestion_meta.get('coverage')!='summary',len(d.content)),reverse=True)
+    result=[];included=[]
+    for doc in docs:
+        if any(doc.publisher==old.publisher and doc.content in old.content for old in included):
+            continue  # The shorter RSS copy adds no context to the full article.
+        length=len(doc.content)
+        for start in range(0,length,NEWS_FRAGMENT_CHARS):
+            chunk={'text':doc.content[start:min(start+NEWS_FRAGMENT_CHARS,length)],'page':None}
+            item=evidence(doc,f'text-{start}',chunk)
+            item['context_span']={'start':start,'end':min(start+NEWS_FRAGMENT_CHARS,length),
+                'document_characters':len(doc.content),'included_characters':length,'truncated':length<len(doc.content)}
+            result.append(item)
+        included.append(doc)
+    if result:
+        result[0]['event_context']={'version':NEWS_CONTEXT_VERSION,'omitted_document_ids':[],
+                                  'full_stored_text':True}
+    return result

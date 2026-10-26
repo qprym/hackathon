@@ -109,6 +109,10 @@ def validate_insight(insight, evidence, context, event_source_ids=None):
                 issues.append(f"{item_id}: Позиция банка должна опираться только на банковские материалы")
             if any(known.get(ref, {}).get('relevance', {}).get('level') == 'irrelevant' for ref in claim.evidence_ids):
                 issues.append(f'{item_id}: источник не связан с предметом события')
+            quantities,_ = dated_numbers(claim.text)
+            if quantities and any(known.get(ref,{}).get('content_type') in ('table','chart')
+                and not known.get(ref,{}).get('numeric_verified') for ref in claim.evidence_ids):
+                issues.append(f'{item_id}: числовые данные таблицы или графика не прошли проверку по оригиналу')
             if (section in ('impact', 'risks', 'opportunities', 'actions') or section == 'answer' and claim.assumption) and any(
                 known.get(ref, {}).get('relevance', {}).get('level') == 'background' for ref in claim.evidence_ids):
                 issues.append(f'{item_id}: фоновая аналитика смежной отрасли не подтверждает персональное последствие или рекомендацию; нужны применимые основания')

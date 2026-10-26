@@ -5,26 +5,32 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Literal
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
-from sqlalchemy import func, select, text
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.orm import Session
 from .auth import admin, authorize_company, current_user, make_session, token_hash, verify_password
 from .config import settings
 from .context import company_context
 from .db import SessionLocal, engine, get_db, initialize_development_schema, utcnow
 from .ingestion import FEEDS, extract_pdf, import_csv, import_document
-from .models import Audit, AuthSession, Budget, Company, Document, Event, Feedback, Link, Run, Usage, User
-from .retrieval import TOPIC_NAMES, RANKING_VERSION, rank_event, search_documents
+from .models import Audit, AuthSession, Budget, Company, Document, Event, Feedback, Link, Run, Usage, User, RankingJob, RelevanceAssessment
+from .retrieval import TOPIC_NAMES, RANKING_VERSION, NEWS_CONTEXT_VERSION, rank_event, search_documents
+from .news_focus import source_focus
+from .event_groups import group_records, diversified
+from .feed_selection import assemble_feed, ORDERING_VERSION
+from types import SimpleNamespace
 from .quality import mode_metrics
 from .bank_relevance import SEARCH_VERSION
-from .schemas import Analyze, FeedbackInput, Login, NewsInput, Question, Role
+from .schemas import Analyze, FeedbackInput, Login, NewsInput, Question, Role, FeedPage
 from .seed import seed
 from .worker import work_loop
 from .feeds import feed_status, refresh_feed
-from .llm import allowance_status
+from .llm import allowance_status, remote_budget_enabled
 from .cashflow import VALIDATION_VERSION
+from .semantic_ranking import SELECTION_VERSION, article_key, fingerprint, feed_ranking, cache_key as assessment_key, enqueue as enqueue_ranking
+from pydantic import BaseModel, Field
 
 
 @asynccontextmanager
@@ -46,7 +52,8 @@ async def lifespan(app):
         worker.join(timeout=3)
 
 
-app = FastAPI(title="Альфа · Контекст", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="Альфа · Контекст", version="0.3.0", lifespan=lifespan,
+              docs_url='/api/docs',openapi_url='/api/openapi.json',redoc_url=None)
 app.add_middleware(CORSMiddleware, allow_origins=settings().allowed_origins.split(","),
                    allow_credentials=True, allow_methods=["GET", "POST"], allow_headers=["Content-Type", "X-Alfa-Request"])
 
@@ -128,32 +135,151 @@ def context(company_id: str, user: User = Depends(current_user), db: Session = D
     return company_context(db, company, user.company_ids)
 
 
-@app.get("/api/feed")
+@app.get('/api/companies/{company_id}/relations')
+def relations(company_id:str,q:str='',direction:Literal['all','incoming','outgoing']='all',
+              offset:int=Query(default=0,ge=0),limit:int=Query(default=30,ge=1,le=100),
+              user:User=Depends(current_user),db:Session=Depends(get_db)):
+    from .context import related_context
+    company=authorize_company(db,user,company_id)
+    return related_context(db,company,user.company_ids,query=q,direction=direction,offset=offset,limit=limit)
+
+
+@app.get("/api/feed",response_model=FeedPage)
 def feed(company_id: str, role: Role = "CFO", topic: str | None = None, corpus: Literal["real", "synthetic"] = "real",
          q: str = "",
+         scope: Literal['personal','all'] | None = None, feed_version: str | None = None,
+         offset: int = Query(default=0,ge=0), limit: int = Query(default=20,ge=1,le=100),
          user: User = Depends(current_user), db: Session = Depends(get_db)):
     company = authorize_company(db, user, company_id)
     ctx = company_context(db, company, user.company_ids)
     if corpus == "synthetic" and not company.synthetic:
         raise HTTPException(422, "Учебные события доступны только для учебных профилей")
+    from . import feed_pages, full_selection
+    from .feed_selection import fold_editions
+    search_scope=scope or ('all' if q.strip() else 'personal')
+    query={'role':role,'topic':topic,'corpus':corpus,'q':q.strip(),'scope':search_scope}
+    if feed_version:
+        return feed_pages.read(db,user,company_id,ctx,query,feed_version,offset,limit)
+    if offset:
+        raise HTTPException(422,'Для следующей страницы необходима версия подборки feed_version')
     stmt = select(Event).where(Event.synthetic == (corpus == "synthetic"))
-    if q.strip():
-        stmt = stmt.where(Event.title.icontains(q.strip()[:200], autoescape=True))
-    events = db.scalars(stmt.order_by(Event.published_at.desc(), Event.id.desc()).limit(500)).all()
+    events = db.scalars(stmt.order_by(Event.published_at.desc(), Event.id.desc())).all()
     entries = []
     ranking_as_of = utcnow()
+    doc_ids = {doc_id for event in events for doc_id in event.document_ids}
+    documents = {d.id:d for d in db.scalars(select(Document).where(Document.id.in_(doc_ids)))} if doc_ids else {}
+    assessments={r.article_key:r for r in db.scalars(select(RelevanceAssessment).where(
+        RelevanceAssessment.company_id==company.id,RelevanceAssessment.context_key==fingerprint(ctx),
+        RelevanceAssessment.version==SELECTION_VERSION,RelevanceAssessment.model_id==settings().llm_analysis_id))
+        if r.cache_key==assessment_key(r.article_key,fingerprint(ctx))} if corpus=='real' else {}
+    selection_counts={'completed':0,'queued':0,'failed':0,'not_requested':0}
+    records = [{'id':e.id,'title':e.title,'published_at':e.published_at.isoformat(),'document_ids':e.document_ids,
+                'sources':[{'url':d.url,'content':d.content} for key in e.document_ids if (d:=documents.get(key))]} for e in events]
+    groups = group_records(records)
     for event in events:
-        if topic and topic not in event.topics:
-            continue
-        event_docs = db.scalars(select(Document).where(Document.id.in_(event.document_ids))).all() if event.document_ids else []
-        doc = next((d for d in event_docs if d.id == event.document_ids[0]), None) if event.document_ids else None
-        ranking = rank_event(event, ctx, role, as_of=ranking_as_of)
+        event_docs = [documents[k] for k in event.document_ids if k in documents]
+        doc = max(event_docs, key=lambda d:len(d.content), default=None)
+        focus = SimpleNamespace(title=event.title, topics=event.topics, published_at=event.published_at,
+                                focus_text=source_focus(event.title, event_docs))
+        if corpus=='real':
+            assessment=assessments.get(article_key(event,event_docs))
+            ranking=feed_ranking(assessment,role)
+            for ground in ranking.get('ranking_grounds',[]):
+                ground['document_id']=next((d.id for d in event_docs if d.content_hash==ground['content_hash']),None)
+            selection_counts[ranking['ranking_status']]+=1
+        else:
+            ranking=rank_event(focus,ctx,role,as_of=ranking_as_of)
+            ranking.update(ranking_method='demo_rules',ranking_status='completed')
         entries.append({"id": event.id, "title": event.title, "topics": event.topics,
+            "event_group":groups[event.id],
+            "document_id":doc.id if doc else None,
             "published_at": event.published_at.isoformat() + "Z", "synthetic": event.synthetic,
             "summary": doc.content[:230] if doc else "", "publisher": doc.publisher if doc else "",
             "source_count": len({d.publisher.casefold().strip() for d in event_docs}), **ranking})
     entries.sort(key=lambda item: (item["score"], item["published_at"], item['id']), reverse=True)
-    return {"items": entries[:50], "topics": TOPIC_NAMES, "company_id": company_id, "role": role, "corpus": corpus}
+    candidates=[item for item in entries if item['eligible']]
+    items=fold_editions(candidates) if corpus=='real' else diversified(candidates)
+    list_selection=None
+    ordering_version='model_score_with_editions' if corpus=='real' else 'model_score'
+    if corpus=='real':
+        from .reading_list import make_payload, apply_cached
+        payload=make_payload(ctx,events,documents,assessments)
+        selected,list_selection=apply_cached(db,company.id,payload,candidates,role)
+        if selected is not None:
+            # Historical shortlists remain evidence of the old run. They do not cap the full feed.
+            chosen={e['id'] for e in selected}
+            items=selected+[e for e in items if e['id'] not in chosen] if selected else [];ordering_version=list_selection['version']
+            list_selection={**list_selection,'coverage':'partial','historical':True}
+        full_payload=full_selection.from_database(db,user,company)
+        complete,full_state=full_selection.apply_cached(db,company.id,full_payload,entries,role)
+        if complete is not None:
+            items=complete;list_selection=full_state;ordering_version=full_selection.VERSION
+        elif full_state['status']!='not_requested':
+            list_selection=full_state
+    if search_scope=='all':
+        ordered_ids={e['id'] for e in items}
+        items=items+[e for e in entries if e['id'] not in ordered_ids]
+    if topic:items=[item for item in items if topic in item['topics']]
+    if q.strip():
+        needle=q.strip().casefold()
+        matched={e.id for e in events if needle in e.title.casefold() or any(needle in documents[k].content.casefold() for k in e.document_ids if k in documents)}
+        items=[item for item in items if item['id'] in matched]
+    payload={"items": items, "topics": TOPIC_NAMES, "company_id": company_id, "role": role, "corpus": corpus,
+            'scope':search_scope,
+            "ranking_version":SELECTION_VERSION if corpus=='real' else RANKING_VERSION,
+            "ordering_version":ordering_version,"list_selection":list_selection,
+            "selection":{'method':'llm' if corpus=='real' else 'demo_rules','model':settings().llm_analysis_id,
+                'total':len(events),**selection_counts,'can_request':not settings().demo_mode and settings().neural_ranking_worker},
+            'pipeline':{'automatic':settings().auto_personalization and settings().llm_provider_mode=='local',
+                'model_available':bool(settings().llm_base_url) and not settings().demo_mode,
+                'provider_mode':settings().llm_provider_mode}}
+    return feed_pages.save(db,user,company_id,ctx,query,payload,offset,limit)
+
+
+class RankNewsRequest(BaseModel):
+    company_id:str
+    event_ids:list[str]=Field(default_factory=list,max_length=50)
+
+
+class ReadingListRequest(BaseModel):
+    company_id:str
+    retry_failed:bool=False
+
+
+@app.post('/api/reading-list',status_code=202)
+def select_reading_list(body:ReadingListRequest,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    company=authorize_company(db,user,body.company_id)
+    if settings().demo_mode or not settings().neural_ranking_worker:
+        raise HTTPException(409,'Сравнительный отбор отключён администратором; сохранённые подборки доступны.')
+    from .full_selection import enqueue
+    from .llm import BudgetExceeded
+    try:return enqueue(db,user,company,retry_failed=body.retry_failed)
+    except BudgetExceeded as exc:raise HTTPException(429,str(exc))
+    except ValueError as exc:raise HTTPException(422,str(exc))
+
+
+@app.post('/api/ranking',status_code=202)
+def rank_news(body:RankNewsRequest,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    company=authorize_company(db,user,body.company_id)
+    if settings().demo_mode:
+        raise HTTPException(409,'На этом стенде отключён платный API. Доступны сохранённые оценки DeepSeek.')
+    if not settings().neural_ranking_worker:
+        raise HTTPException(409,'Фоновый нейросетевой отбор отключён администратором.')
+    allowance=allowance_status(db)
+    if allowance['budget_enforced'] and (allowance['requests_remaining']<2 or allowance['spent_rub']>=allowance['test_limit_rub']):
+        raise HTTPException(429,'Лимит обращений или общий денежный бюджет исчерпан.')
+    stmt=select(Event).where(Event.synthetic.is_(False)).order_by(Event.published_at.desc())
+    if body.event_ids:stmt=stmt.where(Event.id.in_(body.event_ids))
+    events=db.scalars(stmt.limit(50 if body.event_ids else 10)).all()
+    return enqueue_ranking(db,user,company,events,max_jobs=allowance['requests_remaining']//2 if allowance['budget_enforced'] else None)
+
+
+@app.get('/api/ranking/jobs/{job_id}')
+def ranking_job(job_id:str,user:User=Depends(current_user),db:Session=Depends(get_db)):
+    job=db.get(RankingJob,job_id)
+    if not job or job.user_id!=user.id:raise HTTPException(404,'Задача не найдена')
+    authorize_company(db,user,job.company_id)
+    return {'id':job.id,'status':job.status,'error':job.error,'articles':len(job.cache_keys)}
 
 
 @app.get("/api/feeds/status")
@@ -169,26 +295,54 @@ def create_run(db, user, body, question=None, parent=None, single_pass=False):
     if event.synthetic and not company.synthetic:
         raise HTTPException(422, "Учебные события нельзя использовать для реальных компаний")
     # Corpus and relationship versions invalidate previously generated explanations.
-    documents = db.execute(select(Document.id, Document.content_hash).where(Document.synthetic == event.synthetic)
+    from .full_selection import verified_source_ids
+    source_ids=verified_source_ids(db,user,company,event)
+    documents = db.execute(select(Document.id, Document.content_hash).where(Document.synthetic == event.synthetic,
+                           or_(Document.id.in_(source_ids),Document.kind=='bank'))
                            .order_by(Document.id)).all()
     context_version = company_context(db, company, user.company_ids)
+    from .context import related_context
+    relation_version = related_context(db,company,user.company_ids,limit=0)
+    relation_rows = db.execute(select(Link.id,Link.amount,Link.count,Link.details,Link.source_id,Link.target_id).where(
+        or_(Link.source_id==company.id,Link.target_id==company.id)).order_by(Link.id)).all()
+    related_ids={key for row in relation_rows for key in (row.source_id,row.target_id)} & set(user.company_ids)
+    related_profiles=db.execute(select(Company.id,Company.features,Company.industry,Company.region,Company.updated_at)
+        .where(Company.id.in_(related_ids),Company.synthetic==company.synthetic).order_by(Company.id)).all()
+    # Include inline prompts as well as policy constants; no forgotten manual version bump.
+    instruction_revision=hashlib.sha256(b''.join((Path(__file__).parent/name).read_bytes()
+        for name in ('agent.py','review.py','cashflow.py','forecast.py'))).hexdigest()
     access_scope = sorted(set(user.company_ids))
-    key = hashlib.sha256(json.dumps([user.id, access_scope, body.model_dump(), company.features, str(company.updated_at),
-        [list(d) for d in documents], context_version, question, parent if question else None, settings().demo_mode,
-        settings().llm_analysis_id, settings().llm_extraction_id, "prompt-v18", SEARCH_VERSION, VALIDATION_VERSION, RANKING_VERSION], sort_keys=True, default=str).encode()).hexdigest()
+    def key_for_mode(demo_mode):
+        return hashlib.sha256(json.dumps([user.id, access_scope, body.model_dump(), company.features, str(company.updated_at),
+            [list(d) for d in documents], context_version, question, parent if question else None, demo_mode,
+            settings().llm_analysis_id, settings().llm_extraction_id, settings().llm_provider_mode,settings().llm_model_revision,
+            relation_version,[list(r) for r in relation_rows],[list(r) for r in related_profiles],instruction_revision,
+            "prompt-v20", SEARCH_VERSION, VALIDATION_VERSION, RANKING_VERSION, NEWS_CONTEXT_VERSION], sort_keys=True, default=str).encode()).hexdigest()
+    key=key_for_mode(settings().demo_mode)
+    if settings().preview_cached_only and not event.synthetic:
+        existing=db.scalar(select(Run).where(Run.cache_key==key_for_mode(False),Run.status=='completed').order_by(Run.created_at.desc()))
+        if existing:return {'run_id':existing.id,'cached':True}
+        if not question:
+            historical=db.scalar(select(Run).where(Run.user_id==user.id,Run.company_id==company.id,Run.event_id==event.id,
+                Run.role==body.role,Run.question.is_(None),Run.status=='completed',Run.result['mode'].as_string()=='live')
+                .order_by(Run.created_at.desc()).limit(1))
+            if historical and set(historical.access_scope or []).issubset(user.company_ids):
+                return {'run_id':historical.id,'cached':True,'historical':True}
+        raise HTTPException(409,'На этом стенде доступны сохранённые разборы DeepSeek. Для этой компании, роли и статьи готового разбора нет; новый платный вызов отключён.')
     existing = db.scalar(select(Run).where(Run.cache_key == key, Run.status.in_(["queued", "running", "completed"])).order_by(Run.created_at.desc()))
     if existing and not (parent and not question and existing.status == 'completed' and (existing.result or {}).get('verification') == 'insufficient'):
         return {"run_id": existing.id, "cached": existing.status == "completed"}
-    if not settings().demo_mode and (question or not parent) and allowance_status(db)['requests_remaining'] < 5:
+    if not settings().demo_mode and remote_budget_enabled() and (question or not parent) and allowance_status(db)['requests_remaining'] < 5:
         raise HTTPException(429, 'Для нового разбора или вопроса нужны как минимум пять обращений. Оставшаяся квота сохранена; готовые результаты доступны из кеша.')
     pending = db.scalar(select(func.count()).select_from(Run).where(Run.user_id == user.id, Run.status.in_(["queued", "running"])))
     if pending >= 5:
         raise HTTPException(429, "Дождитесь завершения текущих анализов")
     run = Run(user_id=user.id, company_id=company.id, event_id=event.id, role=body.role,
               question=question, parent_id=parent, cache_key=key, access_scope=access_scope)
+    run.trace=[{'step':'Состав события','at':utcnow().isoformat()+'Z','details':{'document_ids':source_ids}}]
     if single_pass:
         run.trace = [{'step': 'Режим пересчёта', 'at': utcnow().isoformat() + 'Z', 'details': {'max_attempts': 1,
-            'note': 'Свежий поиск, один синтез и независимая проверка; максимум два обращения без платных повторов.'}}]
+            'note': 'Свежий поиск, один синтез и независимая проверка; максимум два обращения без платных повторов.'}}] + run.trace
     db.add(run)
     db.commit()
     return {"run_id": run.id, "cached": False}
@@ -213,7 +367,7 @@ def get_run(run_id: str, user: User = Depends(current_user), db: Session = Depen
     run = authorized_run(db, user, run_id)
     rating = db.scalar(select(Feedback).where(Feedback.run_id == run_id, Feedback.user_id == user.id))
     # Trace available to reviewers but cannot expose IDs of inaccessible related companies.
-    steps = [{**s, "details": {k: v for k, v in s["details"].items() if k != "counterparties"}} for s in run.trace]
+    steps = [{**s, "details": {k: v for k, v in s["details"].items() if k != "counterparties"}} for s in run.trace] if user.is_admin else []
     return {"id": run.id, "status": run.status, "stage": run.stage, "trace": steps,
             "result": run.result, "error": run.error, "question": run.question, "role": run.role,
             "company_id": run.company_id, "event_id": run.event_id,
@@ -260,7 +414,7 @@ def retry_insight(run_id: str, user: User = Depends(current_user), db: Session =
     interrupted_draft = run.status == 'failed' and any(step['step'] == 'Черновик анализа' for step in run.trace)
     if not rejected and not interrupted_draft:
         raise HTTPException(409, 'Повтор доступен для отклонённого разбора или сбоя после получения черновика')
-    if not settings().demo_mode and allowance_status(db)['requests_remaining'] < 4:
+    if not settings().demo_mode and remote_budget_enabled() and allowance_status(db)['requests_remaining'] < 4:
         raise HTTPException(429, 'Для исправления с корректирующим циклом нужны четыре оставшихся обращения. Общий лимит не увеличен.')
     return create_run(db, user, Analyze(company_id=run.company_id, event_id=run.event_id, role=run.role), parent=run.id)
 
@@ -271,7 +425,7 @@ def refresh_insight(run_id: str, user: User = Depends(current_user), db: Session
     if (run.status != 'completed' or (run.result or {}).get('verification') != 'checked'
             or (run.result.get('search_version') == SEARCH_VERSION and run.result.get('validation_version') == VALIDATION_VERSION)):
         raise HTTPException(409, 'Пересчёт доступен для проверенного разбора с прежней версией поиска или проверки')
-    if not settings().demo_mode and allowance_status(db)['requests_remaining'] < 2:
+    if not settings().demo_mode and remote_budget_enabled() and allowance_status(db)['requests_remaining'] < 2:
         raise HTTPException(429, 'Для пересчёта и независимой проверки нужны два оставшихся обращения.')
     return create_run(db, user, Analyze(company_id=run.company_id, event_id=run.event_id, role=run.role),
                       parent=run.id, single_pass=True)
@@ -282,9 +436,18 @@ def source(source_id: str, user: User = Depends(current_user), db: Session = Dep
     doc = db.get(Document, source_id)
     if not doc:
         raise HTTPException(404, "Источник не найден")
+    meta=dict(doc.ingestion_meta)
+    if meta.get('original_file') and not meta.get('pages'):
+        count=meta.get('page_count',max((c.get('page') or 0 for c in doc.chunks),default=0))
+        meta['pages']=[]
+        for number in range(1,count+1):
+            chunks=[c for c in doc.chunks if c.get('page')==number]
+            meta['pages'].append({'number':number,'text_status':'empty' if not chunks else
+                'ocr' if any(c.get('extraction')=='ocr' for c in chunks) else 'extracted',
+                'visual_status':'not_verified','numeric_tables_status':'not_verified'})
     return {"id": doc.id, "title": doc.title, "kind": doc.kind, "publisher": doc.publisher,
             "url": doc.url, "published_at": doc.published_at.isoformat() + "Z", "content": doc.content,
-            "chunks": doc.chunks, "synthetic": doc.synthetic, "ingestion": doc.ingestion_meta}
+            "chunks": doc.chunks, "synthetic": doc.synthetic, "ingestion": meta}
 
 
 @app.get("/api/library")
@@ -343,7 +506,7 @@ def upload_pdf(file: UploadFile = File(...), title: str = Form(...), published_a
         doc, created = import_document(db, title=title, content=content, chunks=chunks, kind="bank",
             publisher="Синтетический пример" if synthetic else "Альфа-Банк · материалы кейса",
             published_at=published_at, synthetic=synthetic, ingestion_meta={"original_file": original, "page_count":len(pages),
-                "coverage": "provided", "extraction": "ocr" if any(c.get('extraction') == 'ocr' for c in chunks) else "pdf",
+                "coverage": "provided", "pages":pages, "extraction": "ocr" if any(c.get('extraction') == 'ocr' for c in chunks) else "pdf",
                 "warning": "Текст PDF/OCR: числа, таблицы и графики необходимо сверять с оригиналом."})
         return {"document_id": doc.id, "created": created,
                 "warning": "Извлечен текст. Графики и таблицы нужно сверить с оригиналом; выводы не опираются на нераспознанные изображения."}

@@ -8,7 +8,7 @@ from sqlalchemy import func, select
 from app import llm
 from app.config import settings
 from app.db import SessionLocal, engine
-from app.models import LlmAllowance, Usage
+from app.models import Audit, LlmAllowance, Usage
 
 
 @pytest.fixture
@@ -65,7 +65,7 @@ def test_authorized_extension_preserves_first_twenty_and_stops_at_forty(gateway,
     assert llm.allowance_status(db)['requests_remaining'] == 0
 
 
-@pytest.mark.parametrize('used,limit', [(39, 59), (56, 61), (60, 62), (62, 64)])
+@pytest.mark.parametrize('used,limit', [(39, 59), (56, 61), (60, 62), (62, 64), (63,113)])
 def test_authorized_extension_stops_at_new_total_under_concurrency(gateway, db, monkeypatch, used, limit):
     db.add(LlmAllowance(key=llm.ALLOWANCE_KEY, requests=used, spent=0.1))
     db.commit()
@@ -77,7 +77,7 @@ def test_authorized_extension_stops_at_new_total_under_concurrency(gateway, db, 
         except llm.BudgetExceeded:
             return False
     with ThreadPoolExecutor(max_workers=8) as pool:
-        assert sum(pool.map(attempt, range(30))) == limit - used
+        assert sum(pool.map(attempt, range(limit-used+10))) == limit - used
     assert len(gateway) == limit - used
     db.expire_all()
     assert llm.allowance_status(db)['requests_used'] == limit
@@ -199,3 +199,24 @@ def test_truncated_json_is_not_accepted_even_when_parseable(gateway, monkeypatch
     monkeypatch.setattr(llm.httpx, 'post', respond)
     with pytest.raises(llm.ModelUnavailable, match='обрезан'):
         llm.complete_json('Return JSON', {}, max_tokens=16)
+    with SessionLocal() as db:
+        saved=db.scalar(select(Audit).where(Audit.action=='llm_response'))
+        assert saved.details['choices'][0]['content']=='{"ok":true}'
+
+
+def test_oversized_tracking_id_is_rejected_before_billing(gateway,db):
+    with pytest.raises(llm.ModelUnavailable,match='Идентификатор'):
+        llm.complete_json('Return JSON',{},run_id='selection:'+'a'*36)
+    assert gateway==[] and llm.allowance_status(db)['requests_used']==0
+
+
+def test_context_limit_error_does_not_shorten_or_retry(gateway,monkeypatch):
+    sent=[]
+    def respond(url,**kwargs):
+        sent.append(kwargs['json'])
+        return httpx.Response(400,request=httpx.Request('POST',url),json={'error':{'message':'maximum context length exceeded'}})
+    monkeypatch.setattr(llm.httpx,'post',respond)
+    full='Текст статьи. '*10000
+    with pytest.raises(llm.ModelUnavailable,match='Текст не сокращался'):
+        llm.complete_json('JSON',{'text':full},max_tokens=16)
+    assert len(sent)==1 and full in sent[0]['messages'][1]['content']
